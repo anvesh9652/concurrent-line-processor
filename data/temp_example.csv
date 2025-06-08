@@ -1,0 +1,41 @@
+ID,FirstName,LastName,Age,City,Department,Salary,JoinDate,Status,Score
+1,John,Doe,29,New York,Engineering,75000,2015-06-12,Active,87
+2,Alice,Smith,34,Los Angeles,Marketing,62000,2018-09-23,Active,91
+3,Bob,Johnson,45,Chicago,Sales,58000,2012-11-05,Inactive,76
+4,Carol,Williams,28,Houston,HR,54000,2019-02-14,Active,82
+5,David,Brown,52,Phoenix,Finance,98000,2010-07-30,Active,95
+6,Eva,Jones,31,New York,Engineering,67000,2017-03-08,Inactive,68
+7,Frank,Miller,40,Los Angeles,Marketing,72000,2014-10-19,Active,88
+8,Grace,Davis,26,Chicago,Sales,45000,2020-01-22,Active,79
+9,Henry,Garcia,38,Houston,HR,60000,2013-05-17,Active,85
+10,Irene,Martinez,47,Phoenix,Finance,105000,2009-12-01,Inactive,90
+11,Jack,Wilson,33,New York,Engineering,79000,2016-08-11,Active,94
+12,Karen,Anderson,29,Los Angeles,Marketing,65000,2018-04-29,Active,81
+13,Leo,Thomas,55,Chicago,Sales,89000,2008-09-06,Inactive,73
+14,Mia,Taylor,24,Houston,HR,50000,2021-06-25,Active,88
+15,Noah,Moore,41,Phoenix,Finance,93000,2013-11-13,Active,92
+16,Olivia,Jackson,36,New York,Engineering,81000,2015-02-02,Active,96
+17,Paul,Martin,27,Los Angeles,Marketing,61000,2019-10-31,Inactive,70
+18,Queen,Lee,49,Chicago,Sales,87000,2011-04-15,Active,84
+19,Robert,Perez,32,Houston,HR,58000,2016-12-20,Active,80
+20,Sarah,Thompson,44,Phoenix,Finance,99000,2012-07-05,Active,93
+21,Tom,White,30,New York,Engineering,77000,2017-11-09,Active,89
+22,Ursula,Harris,28,Los Angeles,Marketing,64000,2019-08-18,Active,78
+23,Victor,Sanchez,53,Chicago,Sales,92000,2010-03-03,Inactive,72
+24,Wendy,Clark,25,Houston,HR,52000,2020-09-27,Active,86
+25,Xavier,Rodriguez,35,Phoenix,Finance,88000,2014-05-14,Active,94
+26,Yvonne,Lewis,42,New York,Engineering,83000,2013-10-30,Active,90
+27,Zach,Robinson,31,Los Angeles,Marketing,66000,2016-01-05,Inactive,69
+28,Amy,Walker,46,Chicago,Sales,90000,2009-06-21,Active,85
+29,Brian,Young,38,Houston,HR,61000,2015-03-12,Active,82
+30,Clare,Allen,27,Phoenix,Finance,57000,2019-12-08,Active,91
+31,Dylan,King,34,New York,Engineering,79000,2017-07-16,Active,94
+32,Emma,Wright,29,Los Angeles,Marketing,63000,2018-11-29,Active,88
+33,Felix,Scott,51,Chicago,Sales,84000,2011-01-23,Inactive,75
+34,Gina,Torres,26,Houston,HR,49000,2020-05-02,Active,83
+35,Harry,Nguyen,39,Phoenix,Finance,95000,2012-02-28,Active,97
+36,Isla,Adams,33,New York,Engineering,80000,2016-09-13,Active,92
+37,Jason,Rivera,41,Los Angeles,Marketing,70000,2014-12-16,Active,87
+38,Katie,Campbell,28,Chicago,Sales,55000,2019-04-07,Inactive,77
+39,Luke,Mitchell,45,Houston,HR,62000,2013-08-22,Active,84
+40,Mona,Roberts,30,Phoenix,Finance,60000,2018-06-30,Active,90
