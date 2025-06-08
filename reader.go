@@ -5,78 +5,60 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"runtime"
 	"sync"
 	"sync/atomic"
 )
 
 var (
-	DefaultChunkSize = 1024 * 1024 // 1 MB
+	DefaultChunkSize = 1024 * 24 // 1 MB
 
 	// DefaultWorkers is the number of goroutines to use for reading
 	DefaultWorkers = runtime.NumCPU()
 )
 
-type (
-	Option        func(*ParallelReader)
-	LineProcessor func([]byte) ([]byte, error)
-)
-
-type ParallelReader struct {
-	r                   io.Reader
-	chunkSize           int
-	workers             int
-	customLineProcessor LineProcessor
-
-	rowsRead  int64
-	inStream  chan []byte
-	outStream chan []byte
-}
-
 // NewReader creates parallel reader
 // use one worker to process it sequntially
 func NewReader(r io.Reader, opts ...Option) *ParallelReader {
+	pr, pw := io.Pipe()
 	p := &ParallelReader{
 		r:         r,
 		workers:   DefaultWorkers,
 		chunkSize: DefaultChunkSize,
 		inStream:  make(chan []byte, 100),
 		outStream: make(chan []byte, 100),
+
+		pr: pr,
+		pw: pw,
 	}
+
 	for _, opt := range opts {
 		opt(p)
 	}
+	p.start()
 	return p
 }
 
-func WithChunkSize(size int) Option {
-	return func(pr *ParallelReader) {
-		pr.chunkSize = size
-	}
-}
-
-func WithWorkers(n int) Option {
-	return func(pr *ParallelReader) {
-		pr.workers = n
-	}
-}
-
-func WithCustomLineProcessor(c LineProcessor) Option {
-	return func(pr *ParallelReader) {
-		pr.customLineProcessor = c
-	}
+func (p *ParallelReader) start() {
+	go p.readAsChunks()
+	go p.processChunks()
+	go func() {
+		err := p.readProcessedData()
+		ExistOnError(err)
+	}()
 }
 
 func (p *ParallelReader) Read(b []byte) (int, error) {
-	return p.r.Read(b)
+	return p.pr.Read(b)
 }
 
+// Ignore this func
 func (p *ParallelReader) ReadDataWithChunkOperation(readNumRows int) error {
 	// this operation will be applied on each row
 	go p.readAsChunks()
 	go p.processChunks()
-	p.readProcessedData()
+
+	// go p.readProcessedData(pw)
 	return nil
 }
 
@@ -84,7 +66,7 @@ func (p *ParallelReader) readAsChunks() {
 	leftOver := make([]byte, 0, p.chunkSize*2)
 	buff := make([]byte, p.chunkSize)
 	for {
-		read, err := p.Read(buff)
+		read, err := p.r.Read(buff)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				if len(leftOver) != 0 {
@@ -92,7 +74,7 @@ func (p *ParallelReader) readAsChunks() {
 				}
 				break
 			}
-			log.Fatal(err)
+			ExistOnError(err)
 		}
 
 		currBuff := buff[:read]
@@ -109,7 +91,7 @@ func (p *ParallelReader) readAsChunks() {
 
 		leftOver = append(leftOver[:0], currBuff[ind+1:]...)
 
-		p.inStream <- leftOver
+		p.inStream <- copyToSend
 	}
 	close(p.inStream)
 }
@@ -122,32 +104,19 @@ func (p *ParallelReader) processChunks() {
 			defer wg.Done()
 			for data := range p.inStream {
 				if p.customLineProcessor == nil {
-					fmt.Println("here?")
-					p.sendToStream(data)
+					p.sendToStream(WithNewLine(data))
 					continue
 				}
 
-				var res []byte
-				var err error
-				start := 0
+				lineStart := 0
 				for i, r := range data {
 					if string(r) == "\n" {
-						res, err = p.customLineProcessor(data[start:i])
-						if err != nil {
-							log.Fatal(err)
-						}
-						p.sendToStream(res)
-						start = i + 1
+						ExistOnError(p.processLineAndDispatch(data[lineStart:i]))
+						lineStart = i + 1
 					}
-					atomic.AddInt64(&p.rowsRead, 1)
 				}
-				if start != len(data) {
-					res, err = p.customLineProcessor(data[start:])
-					if err != nil {
-						log.Fatal(err)
-					}
-					p.sendToStream(res)
-					atomic.AddInt64(&p.rowsRead, 1)
+				if lineStart != len(data) {
+					ExistOnError(p.processLineAndDispatch(data[lineStart:]))
 				}
 			}
 		}()
@@ -156,11 +125,25 @@ func (p *ParallelReader) processChunks() {
 	close(p.outStream)
 }
 
-func (p *ParallelReader) readProcessedData() {
-	for data := range p.outStream {
-		_ = data
-		// fmt.Println(string(data))
+func (p *ParallelReader) processLineAndDispatch(data []byte) error {
+	res, err := p.customLineProcessor(data)
+	if err != nil {
+		return err
 	}
+	p.sendToStream(WithNewLine(res))
+	atomic.AddInt64(&p.rowsRead, 1)
+	return nil
+}
+
+func (p *ParallelReader) readProcessedData() error {
+	for data := range p.outStream {
+		// _ = data
+		// printBytes(data)
+		if _, err := p.pw.Write(data); err != nil {
+			return err
+		}
+	}
+	return p.pw.Close()
 }
 
 func (p *ParallelReader) sendToStream(data []byte) {
@@ -173,4 +156,8 @@ func (p *ParallelReader) Close() {
 
 func (p *ParallelReader) RowsRead() int {
 	return int(p.rowsRead)
+}
+
+func printBytes(data []byte) {
+	fmt.Println(string(data))
 }

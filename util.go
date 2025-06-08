@@ -19,3 +19,7 @@ func ExistOnError(err error) {
 		os.Exit(1)
 	}
 }
+
+func WithNewLine(data []byte) []byte {
+	return append(data, '\n')
+}
