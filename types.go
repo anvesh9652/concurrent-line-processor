@@ -17,6 +17,8 @@ type ParallelReader struct {
 	inStream  chan []byte
 	outStream chan []byte
 
+	rowsReadLimit int
+
 	pr io.ReadCloser
 	pw io.WriteCloser
 }

@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	DefaultChunkSize = 1024 * 24 // 1 MB
+	DefaultChunkSize = 1024 * 30 // 30 KB
 
-	// DefaultWorkers is the number of goroutines to use for reading
+	// DefaultWorkers is the number of goroutines to use for processing chunks
 	DefaultWorkers = runtime.NumCPU()
 )
 
@@ -25,8 +25,10 @@ func NewReader(r io.Reader, opts ...Option) *ParallelReader {
 		r:         r,
 		workers:   DefaultWorkers,
 		chunkSize: DefaultChunkSize,
-		inStream:  make(chan []byte, 100),
-		outStream: make(chan []byte, 100),
+		inStream:  make(chan []byte, 50),
+		outStream: make(chan []byte, 50),
+
+		rowsReadLimit: -1,
 
 		pr: pr,
 		pw: pw,
@@ -54,7 +56,6 @@ func (p *ParallelReader) Read(b []byte) (int, error) {
 
 // Ignore this func
 func (p *ParallelReader) ReadDataWithChunkOperation(readNumRows int) error {
-	// this operation will be applied on each row
 	go p.readAsChunks()
 	go p.processChunks()
 
@@ -110,7 +111,7 @@ func (p *ParallelReader) processChunks() {
 
 				lineStart := 0
 				for i, r := range data {
-					if string(r) == "\n" {
+					if r == '\n' {
 						ExistOnError(p.processLineAndDispatch(data[lineStart:i]))
 						lineStart = i + 1
 					}
@@ -148,10 +149,6 @@ func (p *ParallelReader) readProcessedData() error {
 
 func (p *ParallelReader) sendToStream(data []byte) {
 	p.outStream <- data
-}
-
-func (p *ParallelReader) Close() {
-	close(p.outStream)
 }
 
 func (p *ParallelReader) RowsRead() int {

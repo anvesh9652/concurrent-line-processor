@@ -6,7 +6,10 @@ import (
 	"os"
 )
 
-var file1 = "/Users/agali/go-workspace/src/github.com/anvesh9652/parallel-reader/data/temp_example.csv"
+var (
+	file1 = "/Users/agali/go-workspace/src/github.com/anvesh9652/parallel-reader/data/temp_example.csv"
+	file2 = "/Users/agali/go-workspace/src/github.com/anvesh9652/parallel-reader/tmp/2024-06-04-detail.jsonl"
+)
 
 func main() {
 	r, err := os.Open(file1)

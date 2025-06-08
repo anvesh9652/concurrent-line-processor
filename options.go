@@ -17,3 +17,9 @@ func WithCustomLineProcessor(c LineProcessor) Option {
 		pr.customLineProcessor = c
 	}
 }
+
+func WithRowsReadLimit(limit int) Option {
+	return func(pr *ParallelReader) {
+		pr.rowsReadLimit = limit
+	}
+}
