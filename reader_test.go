@@ -10,7 +10,6 @@ import (
 var files = []string{
 	file1,
 	file2,
-
 }
 
 /*
@@ -28,14 +27,14 @@ func BenchmarkNormalReader(b *testing.B) {
 	for _, f := range files {
 		b.Run(fmt.Sprintf("NormalReader - %s", f), func(b *testing.B) {
 			for b.Loop() {
-				r := getFileReader(b, f)
-				FailOnError(b, handleReadWrites(r))
+				r, err := getFileReader(f)
+				FailOnErrorB(b, err)
+				FailOnErrorB(b, handleReadWrites(r))
 				r.Close()
 			}
 		})
 	}
 }
-
 
 /*
 
@@ -54,26 +53,49 @@ func BenchmarkParallelReader(b *testing.B) {
 	for _, f := range files {
 		b.Run(fmt.Sprintf("ParallelReader - %s", f), func(b *testing.B) {
 			for b.Loop() {
-				r := getFileReader(b, f)
+				r, err := getFileReader(f)
+				FailOnErrorB(b, err)
 				pr := NewReader(r, WithCustomLineProcessor(func(b []byte) ([]byte, error) {
 					return b, nil
 				}), WithWorkers(5))
-				FailOnError(b, handleReadWrites(pr))
+				FailOnErrorB(b, handleReadWrites(pr))
 			}
 		})
 	}
 }
 
-func FailOnError(b *testing.B, err error) {
+func TestParallelReader(t *testing.T) {
+	t.Run("Run Test", func(t *testing.T) {
+		r, err := getFileReader(files[1])
+		FailOnErrorT(t, err)
+		pr := NewTestParallelReader(r)
+		err = handleReadWrites(pr)
+		fmt.Println(pr.RowsRead())
+		FailOnErrorT(t, err)
+	})
+}
+
+func NewTestParallelReader(r io.Reader) *ParallelReader {
+	custOp := func(b []byte) ([]byte, error) {
+		return b, nil
+	}
+	return NewReader(r, WithCustomLineProcessor(custOp), WithWorkers(1))
+}
+
+func FailOnErrorB(b *testing.B, err error) {
 	if err != nil {
 		b.Error(err)
 	}
 }
 
-func getFileReader(b *testing.B, file string) io.ReadCloser {
-	f, err := os.Open(file)
-	FailOnError(b, err)
-	return f
+func FailOnErrorT(t *testing.T, err error) {
+	if err != nil {
+		t.Error(err)
+	}
+}
+
+func getFileReader(file string) (io.ReadCloser, error) {
+	return os.Open(file)
 }
 
 func handleReadWrites(r io.Reader) error {

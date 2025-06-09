@@ -7,18 +7,26 @@ type (
 	LineProcessor func([]byte) ([]byte, error)
 )
 
+type Chunk struct {
+	id   int
+	data []byte
+}
+
 type ParallelReader struct {
-	r                   io.Reader
-	chunkSize           int
-	workers             int
+	r         io.Reader
+	chunkSize int
+	workers   int
+	rowsRead  int64
+
 	customLineProcessor LineProcessor
 
-	rowsRead  int64
 	inStream  chan []byte
 	outStream chan []byte
 
+	errChan chan error
+
 	rowsReadLimit int
 
-	pr io.ReadCloser
-	pw io.WriteCloser
+	pr *io.PipeReader
+	pw *io.PipeWriter
 }

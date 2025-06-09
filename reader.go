@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 )
@@ -22,13 +23,14 @@ var (
 func NewReader(r io.Reader, opts ...Option) *ParallelReader {
 	pr, pw := io.Pipe()
 	p := &ParallelReader{
-		r:         r,
-		workers:   DefaultWorkers,
-		chunkSize: DefaultChunkSize,
+		r:             r,
+		workers:       DefaultWorkers,
+		chunkSize:     DefaultChunkSize,
+		rowsReadLimit: -1,
+
 		inStream:  make(chan []byte, 50),
 		outStream: make(chan []byte, 50),
-
-		rowsReadLimit: -1,
+		errChan:   make(chan error, 1),
 
 		pr: pr,
 		pw: pw,
@@ -45,12 +47,30 @@ func (p *ParallelReader) start() {
 	go p.readAsChunks()
 	go p.processChunks()
 	go func() {
-		err := p.readProcessedData()
-		ExistOnError(err)
+		if err := p.readProcessedData(); err != nil {
+			p.errChan <- err
+		}
+	}()
+
+	// listen for errors
+	go func() {
+		for {
+			fmt.Println("looping")
+			// close all the channels properly
+			if len(p.errChan) != 0 {
+				fmt.Println("in error")
+				close(p.inStream)
+				close(p.outStream)
+			}
+		}
 	}()
 }
 
 func (p *ParallelReader) Read(b []byte) (int, error) {
+	if len(p.errChan) != 0 {
+		err := <-p.errChan
+		return 0, err
+	}
 	return p.pr.Read(b)
 }
 
@@ -75,7 +95,8 @@ func (p *ParallelReader) readAsChunks() {
 				}
 				break
 			}
-			ExistOnError(err)
+			p.errChan <- err
+			return // ?
 		}
 
 		currBuff := buff[:read]
@@ -105,19 +126,31 @@ func (p *ParallelReader) processChunks() {
 			defer wg.Done()
 			for data := range p.inStream {
 				if p.customLineProcessor == nil {
-					p.sendToStream(WithNewLine(data))
-					continue
-				}
-
-				lineStart := 0
-				for i, r := range data {
-					if r == '\n' {
-						ExistOnError(p.processLineAndDispatch(data[lineStart:i]))
-						lineStart = i + 1
+					tempData := WithNewLine(data)
+					atomic.AddInt64(&p.rowsRead, int64(bytes.Count(tempData, []byte("\n"))))
+					p.sendToStream(tempData)
+				} else {
+					lineStart := 0
+					for i, r := range data {
+						if r == '\n' {
+							err := p.processLineAndDispatch(data[lineStart:i])
+							if err != nil {
+								p.errChan <- err
+							}
+							lineStart = i + 1
+						}
+					}
+					if lineStart != len(data) {
+						err := p.processLineAndDispatch(data[lineStart:])
+						if err != nil {
+							p.errChan <- err
+							return
+						}
 					}
 				}
-				if lineStart != len(data) {
-					ExistOnError(p.processLineAndDispatch(data[lineStart:]))
+				if p.RowsRead() >= 7000 {
+					p.errChan <- errors.New("this is test error")
+					return
 				}
 			}
 		}()
@@ -157,4 +190,8 @@ func (p *ParallelReader) RowsRead() int {
 
 func printBytes(data []byte) {
 	fmt.Println(string(data))
+}
+
+func errWithDebugStack(err error) error {
+	return errors.Join(err, fmt.Errorf("debug logs: %s", debug.Stack()))
 }
