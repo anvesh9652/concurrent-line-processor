@@ -20,10 +20,8 @@ type ParallelReader struct {
 
 	customLineProcessor LineProcessor
 
-	inStream  chan []byte
-	outStream chan []byte
-
-	errChan chan error
+	inStream  chan *Chunk
+	outStream chan *Chunk
 
 	rowsReadLimit int
 

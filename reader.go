@@ -7,8 +7,8 @@ import (
 	"io"
 	"runtime"
 	"runtime/debug"
-	"sync"
-	"sync/atomic"
+
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -28,9 +28,10 @@ func NewReader(r io.Reader, opts ...Option) *ParallelReader {
 		chunkSize:     DefaultChunkSize,
 		rowsReadLimit: -1,
 
-		inStream:  make(chan []byte, 50),
-		outStream: make(chan []byte, 50),
-		errChan:   make(chan error, 1),
+		inStream:  make(chan *Chunk, 50),
+		outStream: make(chan *Chunk, 50),
+
+		customLineProcessor: func(b []byte) ([]byte, error) { return b, nil },
 
 		pr: pr,
 		pw: pw,
@@ -39,64 +40,43 @@ func NewReader(r io.Reader, opts ...Option) *ParallelReader {
 	for _, opt := range opts {
 		opt(p)
 	}
-	p.start()
+	go func() {
+		p.start()
+	}()
 	return p
 }
 
 func (p *ParallelReader) start() {
-	go p.readAsChunks()
-	go p.processChunks()
-	go func() {
-		if err := p.readProcessedData(); err != nil {
-			p.errChan <- err
-		}
-	}()
+	eg := errgroup.Group{}
+	eg.Go(p.readAsChunks)
+	eg.Go(p.processChunks)
+	eg.Go(p.readProcessedData)
 
-	// listen for errors
-	go func() {
-		for {
-			fmt.Println("looping")
-			// close all the channels properly
-			if len(p.errChan) != 0 {
-				fmt.Println("in error")
-				close(p.inStream)
-				close(p.outStream)
-			}
-		}
-	}()
+	if err := eg.Wait(); err != nil {
+		fmt.Println("iam here:", err)
+		p.pw.CloseWithError(err)
+	}
 }
 
 func (p *ParallelReader) Read(b []byte) (int, error) {
-	if len(p.errChan) != 0 {
-		err := <-p.errChan
-		return 0, err
-	}
 	return p.pr.Read(b)
 }
 
-// Ignore this func
-func (p *ParallelReader) ReadDataWithChunkOperation(readNumRows int) error {
-	go p.readAsChunks()
-	go p.processChunks()
-
-	// go p.readProcessedData(pw)
-	return nil
-}
-
-func (p *ParallelReader) readAsChunks() {
+func (p *ParallelReader) readAsChunks() error {
+	defer close(p.inStream)
 	leftOver := make([]byte, 0, p.chunkSize*2)
 	buff := make([]byte, p.chunkSize)
+	chunkID := 1
 	for {
 		read, err := p.r.Read(buff)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				if len(leftOver) != 0 {
-					p.inStream <- leftOver
+					p.inStream <- &Chunk{id: chunkID, data: leftOver}
 				}
 				break
 			}
-			p.errChan <- err
-			return // ?
+			return err
 		}
 
 		currBuff := buff[:read]
@@ -113,75 +93,66 @@ func (p *ParallelReader) readAsChunks() {
 
 		leftOver = append(leftOver[:0], currBuff[ind+1:]...)
 
-		p.inStream <- copyToSend
+		p.inStream <- &Chunk{id: chunkID, data: copyToSend}
+		chunkID++
+
 	}
-	close(p.inStream)
+	return nil
 }
 
-func (p *ParallelReader) processChunks() {
-	wg := sync.WaitGroup{}
+func (p *ParallelReader) processChunks() error {
+	defer close(p.outStream)
+	poolErrG := errgroup.Group{}
 	for range p.workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for data := range p.inStream {
-				if p.customLineProcessor == nil {
-					tempData := WithNewLine(data)
-					atomic.AddInt64(&p.rowsRead, int64(bytes.Count(tempData, []byte("\n"))))
-					p.sendToStream(tempData)
-				} else {
-					lineStart := 0
-					for i, r := range data {
-						if r == '\n' {
-							err := p.processLineAndDispatch(data[lineStart:i])
-							if err != nil {
-								p.errChan <- err
-							}
-							lineStart = i + 1
-						}
+		poolErrG.Go(func() error {
+			for chunk := range p.inStream {
+				lineStart := 0
+				for i, r := range chunk.data {
+					if i == len(chunk.data)-1 {
+						i++
 					}
-					if lineStart != len(data) {
-						err := p.processLineAndDispatch(data[lineStart:])
-						if err != nil {
-							p.errChan <- err
-							return
+					if r == '\n' || i == len(chunk.data) {
+						if err := p.processLineAndDispatch(chunk, lineStart, i); err != nil {
+							return err
 						}
+						lineStart = i + 1
 					}
-				}
-				if p.RowsRead() >= 7000 {
-					p.errChan <- errors.New("this is test error")
-					return
 				}
 			}
-		}()
+			return nil
+		})
 	}
-	wg.Wait()
-	close(p.outStream)
+	return poolErrG.Wait()
 }
 
-func (p *ParallelReader) processLineAndDispatch(data []byte) error {
-	res, err := p.customLineProcessor(data)
+func (p *ParallelReader) processLineAndDispatch(c *Chunk, s, e int) error {
+	res, err := p.customLineProcessor(c.data)
 	if err != nil {
 		return err
 	}
-	p.sendToStream(WithNewLine(res))
-	atomic.AddInt64(&p.rowsRead, 1)
+	c.data = WithNewLine(res)
+	p.sendToStream(c)
+	// atomic.AddInt64(&p.rowsRead, 1)
 	return nil
 }
 
 func (p *ParallelReader) readProcessedData() error {
-	for data := range p.outStream {
+	for chunk := range p.outStream {
 		// _ = data
 		// printBytes(data)
-		if _, err := p.pw.Write(data); err != nil {
+		if _, err := p.pw.Write(chunk.data); err != nil {
 			return err
+		}
+		p.rowsRead++
+		if p.rowsReadLimit != -1 && p.rowsRead >= int64(p.rowsReadLimit) {
+			break
 		}
 	}
 	return p.pw.Close()
 }
 
-func (p *ParallelReader) sendToStream(data []byte) {
-	p.outStream <- data
+func (p *ParallelReader) sendToStream(c *Chunk) {
+	p.outStream <- c
 }
 
 func (p *ParallelReader) RowsRead() int {
