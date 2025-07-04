@@ -19,12 +19,12 @@ import (
 var (
 	DefaultChunkSize = 1024 * 30 // 30 KB
 
-	// DefaultWorkers is the number of goroutines to use for processing chunks
+	// DefaultWorkers is the number of goroutines used for processing chunks
 	DefaultWorkers  = runtime.NumCPU()
 	defaultChanSize = 50
 )
 
-// NewReader creates parallel reader
+// NewReader creates a parallel reader.
 func NewReader(r io.Reader, opts ...Option) *ParallelReader {
 	pr, pw := io.Pipe()
 	p := &ParallelReader{
@@ -80,8 +80,8 @@ func (p *ParallelReader) start() {
 		}
 	}()
 
-	// Learning: if a goroutine returns an error, the other goroutines are still running
-	// then we will not get any error on eg.Wait()
+	// Learning: if a goroutine returns an error, the other goroutines are still running.
+	// Therefore, we will not get any error on eg.Wait()
 	err := eg.Wait()
 	p.metrics.TimeTook = time.Since(now).String()
 	p.pw.CloseWithError(err)
@@ -96,7 +96,7 @@ func (p *ParallelReader) readAsChunks(ctx context.Context) error {
 
 	defer close(p.inStream)
 	for {
-		// If rows read limit is set, check if it has been reached
+		// If rowsReadLimit is set, check if it has been reached
 		if p.rowsReadLimit != -1 && p.RowsRead() >= p.rowsReadLimit {
 			break
 		}
@@ -172,8 +172,8 @@ func (p *ParallelReader) processChunk(ctx context.Context, chunk *Chunk) error {
 			if err != nil {
 				return err
 			}
-			// Learning: writing each line to the outptut stream one by one drastically reduces the performance
-			// because of the number of system calls. so better to write the whole chunk at once to the output stream
+			// Learning: writing each line to the output stream one by one drastically reduces performance
+			// due to the number of system calls. It is better to write the whole chunk at once to the output stream
 			*buff = append(*buff, WithNewLine(pb)...)
 			lineStart = i + 1
 		}
@@ -208,8 +208,8 @@ func (p *ParallelReader) readProcessedData(ctx context.Context) error {
 			return err
 		}
 
-		// Actually it's not needed to count the bytes atomically,
-		// this i have done to see at each tick how many bytes are read
+		// Actually, it's not necessary to count the bytes atomically.
+		// This was done to observe how many bytes are read at each tick.
 		atomic.AddInt64(&p.metrics.RowsRead, int64(linesNeeded))
 		atomic.AddInt64(&p.metrics.TransformedBytes, int64(n))
 		*buff = (*buff)[:0]
@@ -222,7 +222,7 @@ func (p *ParallelReader) readProcessedData(ctx context.Context) error {
 	return nil
 }
 
-// takes 1 based position of new line
+// takes 1-based position of new line
 func ithBytePosition(data *[]byte, ith int, tar byte) int {
 	for i, b := range *data {
 		if b == tar {

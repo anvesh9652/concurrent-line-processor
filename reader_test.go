@@ -82,12 +82,14 @@ func NewTestParallelReader(r io.Reader) *ParallelReader {
 	return NewReader(r, WithCustomLineProcessor(custOp), WithWorkers(1))
 }
 
+// FailOnErrorB reports an error in a benchmark if err is not nil.
 func FailOnErrorB(b *testing.B, err error) {
 	if err != nil {
 		b.Error(err)
 	}
 }
 
+// FailOnErrorT reports an error in a test if err is not nil.
 func FailOnErrorT(t *testing.T, err error) {
 	if err != nil {
 		t.Error(err)

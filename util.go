@@ -27,7 +27,7 @@ func WithNewLine(data []byte) []byte {
 }
 
 func ErrWithDebugStack(err error) error {
-	return errors.Join(err, fmt.Errorf("Debug Error Statck: %s\n", debug.Stack()))
+	return errors.Join(err, fmt.Errorf("Debug Error Stack: %s\n", debug.Stack()))
 }
 
 func PrintAsJsonString(d any) {
