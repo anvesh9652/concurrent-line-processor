@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"runtime"
 	"sync"
@@ -24,11 +23,12 @@ var (
 	defaultChanSize = 50
 )
 
-// NewConcurrentLineProcessor creates a parallel reader.
+// NewConcurrentLineProcessor creates a new ConcurrentLineProcessor that reads from the provided io.Reader.
 func NewConcurrentLineProcessor(r io.Reader, opts ...Option) *ConcurrentLineProcessor {
 	pr, pw := io.Pipe()
 	p := &ConcurrentLineProcessor{
-		srcReader:     r,
+		srcReader: r,
+
 		workers:       DefaultWorkers,
 		chunkSize:     DefaultChunkSize,
 		rowsReadLimit: -1,
@@ -71,14 +71,6 @@ func (p *ConcurrentLineProcessor) start() {
 	eg.Go(func() error { return p.readAsChunks(ctx) })
 	eg.Go(func() error { return p.processChunks(ctx) })
 	eg.Go(func() error { return p.readProcessedData(ctx) })
-
-	go func() {
-		t := time.NewTicker(5 * time.Second)
-		start := time.Now()
-		for range t.C {
-			fmt.Println("Rows read so far:", p.RowsRead(), "Took:", time.Since(start))
-		}
-	}()
 
 	// Learning: if a goroutine returns an error, the other goroutines are still running.
 	// Therefore, we will not get any error on eg.Wait()
@@ -172,7 +164,7 @@ func (p *ConcurrentLineProcessor) processChunk(ctx context.Context, chunk *Chunk
 			if err != nil {
 				return err
 			}
-			// Learning: writing each line to the output stream one by one drastically reduces performance
+			// Learning: writing each line to the output stream one by one drastically worse performance
 			// due to the number of system calls. It is better to write the whole chunk at once to the output stream
 			*buff = append(*buff, WithNewLine(pb)...)
 			lineStart = i + 1
@@ -222,7 +214,7 @@ func (p *ConcurrentLineProcessor) readProcessedData(ctx context.Context) error {
 	return nil
 }
 
-// takes 1-based position of new line
+// takes 1-based position ith of the byte in the data
 func ithBytePosition(data *[]byte, ith int, tar byte) int {
 	for i, b := range *data {
 		if b == tar {

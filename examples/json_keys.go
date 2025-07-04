@@ -19,8 +19,8 @@ func GetAllKeys(r io.Reader) {
 	)
 	_, err := io.Copy(io.Discard, nr)
 	clp.ExistOnError(err)
-	clp.PrintAsJsonString(nr.Metrics())
 	clp.PrintAsJsonString(keys)
+	clp.PrintAsJsonString(nr.Metrics())
 }
 
 func processBytes(b []byte, keys map[string]bool) ([]byte, error) {
@@ -35,6 +35,5 @@ func processBytes(b []byte, keys map[string]bool) ([]byte, error) {
 		keys[k] = true
 	}
 	mut.Unlock()
-	// return json.Marshal(d)
-	return b, nil
+	return json.Marshal(d)
 }

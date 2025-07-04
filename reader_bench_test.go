@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"testing"
-
 )
 
 var files = []string{
