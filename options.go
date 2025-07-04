@@ -1,5 +1,11 @@
 package main
 
+func WithOpts(p *ParallelReader, opts ...Option) {
+	for _, opt := range opts {
+		opt(p)
+	}
+}
+
 func WithChunkSize(size int) Option {
 	return func(pr *ParallelReader) {
 		pr.chunkSize = size

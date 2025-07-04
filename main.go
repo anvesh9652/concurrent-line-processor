@@ -3,14 +3,12 @@ package main
 import (
 	"encoding/json"
 	"flag"
-	"fmt"
 	"io"
 	"log"
 	"os"
 	"runtime"
 	"runtime/pprof"
 	"sync"
-	"time"
 )
 
 var (
@@ -29,9 +27,7 @@ var (
 func main() {
 	cpuProfile()
 	defer pprof.StopCPUProfile()
-	now := time.Now()
 	start()
-	fmt.Println("took:", time.Since(now))
 	memProfile()
 }
 
@@ -45,10 +41,14 @@ func start() {
 		return b, nil
 	}
 
-	nr := NewReader(r, WithChunkSize(1024*1024*4), WithWorkers(8), WithCustomLineProcessor(customProcessor))
+	nr := NewReader(r,
+		WithChunkSize(1024*1024*4),
+		WithWorkers(8),
+		WithRowsReadLimit(-1),
+		WithCustomLineProcessor(customProcessor),
+	)
 	_, err = io.Copy(io.Discard, nr)
 	ExistOnError(err)
-	fmt.Println("Rows Read:", nr.RowsRead())
 	PrintAsJsonString(nr.Metrics())
 }
 

@@ -14,18 +14,17 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// TODO: Need to reduce the number of memory allocations
+
 var (
 	DefaultChunkSize = 1024 * 30 // 30 KB
 
 	// DefaultWorkers is the number of goroutines to use for processing chunks
 	DefaultWorkers  = runtime.NumCPU()
 	defaultChanSize = 50
-
-	errTest = errors.New("this is test error")
 )
 
 // NewReader creates parallel reader
-// use one worker to process it sequntially
 func NewReader(r io.Reader, opts ...Option) *ParallelReader {
 	pr, pw := io.Pipe()
 	p := &ParallelReader{
@@ -35,7 +34,7 @@ func NewReader(r io.Reader, opts ...Option) *ParallelReader {
 		rowsReadLimit: -1,
 
 		inStream:  make(chan *Chunk, defaultChanSize),
-		outStream: make(chan *Chunk, defaultChanSize*1000),
+		outStream: make(chan *Chunk, defaultChanSize),
 
 		pool: sync.Pool{
 			New: func() any {
@@ -49,20 +48,30 @@ func NewReader(r io.Reader, opts ...Option) *ParallelReader {
 		customLineProcessor: func(b []byte) ([]byte, error) { return b, nil },
 	}
 
-	for _, opt := range opts {
-		opt(p)
-	}
-	go func() {
-		p.start()
-	}()
+	WithOpts(p, opts...)
+	go func() { p.start() }()
 	return p
 }
 
+func (p *ParallelReader) Read(b []byte) (int, error) {
+	return p.pr.Read(b)
+}
+
+func (p *ParallelReader) Metrics() Metrics {
+	return p.metrics
+}
+
+func (p *ParallelReader) RowsRead() int {
+	return int(atomic.LoadInt64(&p.metrics.RowsRead))
+}
+
 func (p *ParallelReader) start() {
+	now := time.Now()
 	eg, ctx := errgroup.WithContext(context.Background())
 	eg.Go(func() error { return p.readAsChunks(ctx) })
 	eg.Go(func() error { return p.processChunks(ctx) })
 	eg.Go(func() error { return p.readProcessedData(ctx) })
+
 	go func() {
 		t := time.NewTicker(5 * time.Second)
 		start := time.Now()
@@ -71,11 +80,11 @@ func (p *ParallelReader) start() {
 		}
 	}()
 
-	p.pw.CloseWithError(eg.Wait())
-}
-
-func (p *ParallelReader) Read(b []byte) (int, error) {
-	return p.pr.Read(b)
+	// Learning: if a goroutine returns an error, the other goroutines are still running
+	// then we will not get any error on eg.Wait()
+	err := eg.Wait()
+	p.metrics.TimeTook = time.Since(now).String()
+	p.pw.CloseWithError(err)
 }
 
 func (p *ParallelReader) readAsChunks(ctx context.Context) error {
@@ -84,9 +93,13 @@ func (p *ParallelReader) readAsChunks(ctx context.Context) error {
 		buff     = make([]byte, p.chunkSize)
 		chunkID  = 1
 	)
-	defer close(p.inStream)
 
+	defer close(p.inStream)
 	for {
+		// If rows read limit is set, check if it has been reached
+		if p.rowsReadLimit != -1 && p.RowsRead() >= p.rowsReadLimit {
+			break
+		}
 		read, err := p.srcReader.Read(buff)
 		p.metrics.BytesRead += int64(read)
 		if err != nil {
@@ -159,6 +172,8 @@ func (p *ParallelReader) processChunk(ctx context.Context, chunk *Chunk) error {
 			if err != nil {
 				return err
 			}
+			// Learning: writing each line to the outptut stream one by one drastically reduces the performance
+			// because of the number of system calls. so better to write the whole chunk at once to the output stream
 			*buff = append(*buff, WithNewLine(pb)...)
 			lineStart = i + 1
 		}
@@ -177,20 +192,47 @@ func (p *ParallelReader) readProcessedData(ctx context.Context) error {
 		}
 
 		buff := chunk.data
-		atomic.AddInt64(&p.metrics.RowsRead, int64(bytes.Count(*buff, []byte("\n"))))
-		atomic.AddInt64(&p.metrics.TransformedBytes, int64(len(*buff)))
+		newLines := bytes.Count(*buff, []byte("\n"))
+		rr := int(p.RowsRead())
+		linesNeeded := newLines
+		if p.rowsReadLimit != -1 {
+			if rr+newLines > p.rowsReadLimit {
+				linesNeeded = (p.rowsReadLimit - rr)
+				pos := ithBytePosition(buff, linesNeeded, '\n')
+				*buff = (*buff)[:pos+1] // +1 to include the new line character
+			}
+		}
 
-		if _, err := p.pw.Write(*buff); err != nil {
+		n, err := p.pw.Write(*buff)
+		if err != nil {
 			return err
 		}
 
+		// Actually it's not needed to count the bytes atomically,
+		// this i have done to see at each tick how many bytes are read
+		atomic.AddInt64(&p.metrics.RowsRead, int64(linesNeeded))
+		atomic.AddInt64(&p.metrics.TransformedBytes, int64(n))
 		*buff = (*buff)[:0]
 		p.pool.Put(buff)
+
 		if p.rowsReadLimit != -1 && p.RowsRead() >= p.rowsReadLimit {
 			break
 		}
 	}
 	return nil
+}
+
+// takes 1 based position of new line
+func ithBytePosition(data *[]byte, ith int, tar byte) int {
+	for i, b := range *data {
+		if b == tar {
+			ith--
+			if ith == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func sendToStream(ctx context.Context, s chan *Chunk, c *Chunk) error {
@@ -209,12 +251,4 @@ func getFromStream(ctx context.Context, s chan *Chunk) (*Chunk, error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-}
-
-func (p *ParallelReader) Metrics() Metrics {
-	return p.metrics
-}
-
-func (p *ParallelReader) RowsRead() int {
-	return int(atomic.LoadInt64(&p.metrics.RowsRead))
 }
