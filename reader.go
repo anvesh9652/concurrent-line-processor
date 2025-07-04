@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"runtime"
-	"runtime/debug"
 	"sync"
 	"time"
 
@@ -26,7 +25,7 @@ var (
 func NewReader(r io.Reader, opts ...Option) *ParallelReader {
 	pr, pw := io.Pipe()
 	p := &ParallelReader{
-		r:             r,
+		srcReader:     r,
 		workers:       DefaultWorkers,
 		chunkSize:     DefaultChunkSize,
 		rowsReadLimit: -1,
@@ -65,7 +64,7 @@ func (p *ParallelReader) start() {
 		t := time.NewTicker(5 * time.Second)
 		start := time.Now()
 		for range t.C {
-			fmt.Println("Rows read so far:", p.RowsRead(), "so_far took:", time.Since(start))
+			fmt.Println("Rows read so far:", p.RowsRead(), "Took:", time.Since(start))
 		}
 	}()
 
@@ -79,14 +78,15 @@ func (p *ParallelReader) Read(b []byte) (int, error) {
 }
 
 func (p *ParallelReader) readAsChunks() error {
+	var (
+		leftOver = make([]byte, 0, p.chunkSize*2)
+		buff     = make([]byte, p.chunkSize)
+		chunkID  = 1
+	)
 	defer close(p.inStream)
-	leftOver := make([]byte, 0, p.chunkSize*2)
-	buff := make([]byte, p.chunkSize)
-	chunkID := 1
-	now := time.Now()
 	for {
-		read, err := p.r.Read(buff)
-		p.metrics.BytesRead += read
+		read, err := p.srcReader.Read(buff)
+		p.Metrics.BytesRead += read
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				if len(leftOver) != 0 {
@@ -98,7 +98,6 @@ func (p *ParallelReader) readAsChunks() error {
 		}
 
 		currBuff := buff[:read]
-
 		ind := bytes.LastIndex(currBuff, []byte("\n"))
 		if ind == -1 {
 			leftOver = append(leftOver, buff[:read]...)
@@ -113,9 +112,7 @@ func (p *ParallelReader) readAsChunks() error {
 
 		p.inStream <- &Chunk{id: chunkID, data: &copyToSend}
 		chunkID++
-
 	}
-	fmt.Println("Read chunks took:", time.Since(now))
 	return nil
 }
 
@@ -150,13 +147,10 @@ func (p *ParallelReader) processChunk(chunk *Chunk) error {
 				return err
 			}
 			*buff = append(*buff, WithNewLine(pb)...)
-			// todo: sending this pb directly to stream or collecting it and then sending to stream
-			// are bottlenecks, so we need to optimize this
 			lineStart = i + 1
 		}
 	}
-	c := Chunk{id: chunk.id, data: buff}
-	p.sendToStream(&c)
+	p.sendToStream(&Chunk{id: chunk.id, data: buff})
 	return nil
 }
 
@@ -164,8 +158,8 @@ func (p *ParallelReader) readProcessedData() error {
 	defer p.pw.Close()
 	for chunk := range p.outStream {
 		buff := chunk.data
-		p.metrics.RowsRead += int64(bytes.Count(*buff, []byte("\n")))
-		p.metrics.TransformedBytes += len(*buff)
+		p.Metrics.RowsRead += int64(bytes.Count(*buff, []byte("\n")))
+		p.Metrics.TransformedBytes += len(*buff)
 
 		if _, err := p.pw.Write(*buff); err != nil {
 			return err
@@ -185,9 +179,5 @@ func (p *ParallelReader) sendToStream(c *Chunk) {
 }
 
 func (p *ParallelReader) RowsRead() int {
-	return int(p.metrics.RowsRead)
-}
-
-func errWithDebugStack(err error) error {
-	return errors.Join(err, fmt.Errorf("debug logs: %s", debug.Stack()))
+	return int(p.Metrics.RowsRead)
 }

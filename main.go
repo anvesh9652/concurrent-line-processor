@@ -61,7 +61,6 @@ func memProfile() {
 		if err := pprof.WriteHeapProfile(mf); err != nil {
 			log.Fatal(err)
 		}
-
 		defer mf.Close()
 	}
 }

@@ -15,11 +15,6 @@ type Chunk struct {
 	data *[]byte
 }
 
-// type OutChunk struct {
-// 	id   int
-// 	data *[]byte
-// }
-
 type Metrics struct {
 	BytesRead        int
 	TransformedBytes int
@@ -27,7 +22,8 @@ type Metrics struct {
 }
 
 type ParallelReader struct {
-	r         io.Reader
+	srcReader io.Reader
+
 	chunkSize int
 	workers   int
 

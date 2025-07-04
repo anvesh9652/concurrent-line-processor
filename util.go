@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -22,4 +23,8 @@ func ExistOnError(err error) {
 
 func WithNewLine(data []byte) []byte {
 	return append(data, '\n')
+}
+
+func ErrWithDebugStack(err error) error {
+	return errors.Join(err, fmt.Errorf("debug logs: %s", debug.Stack()))
 }
