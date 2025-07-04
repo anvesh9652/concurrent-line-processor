@@ -1,4 +1,4 @@
-package main
+package concurrentlineprocessor
 
 import (
 	"io"
@@ -6,7 +6,7 @@ import (
 )
 
 type (
-	Option        func(*ParallelReader)
+	Option        func(*ConcurrentLineProcessor)
 	LineProcessor func([]byte) ([]byte, error)
 )
 
@@ -27,7 +27,7 @@ type Metrics struct {
 	TimeTook string `json:"time_took"`
 }
 
-type ParallelReader struct {
+type ConcurrentLineProcessor struct {
 	// srcReader is the source reader from which data will be read.
 	srcReader io.Reader
 

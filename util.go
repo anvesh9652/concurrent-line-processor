@@ -1,4 +1,4 @@
-package main
+package concurrentlineprocessor
 
 import (
 	"encoding/json"
@@ -7,6 +7,14 @@ import (
 	"os"
 	"runtime/debug"
 )
+
+// Test files List
+var Files = []string{
+	"/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv",
+	"/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-details.jsonl",
+	"/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/transform-00002_1.csv.jsonl",
+	"/Users/agali/Desktop/Work/go-lang/tryouts/1brc/src_data.txt",
+}
 
 func IFNull[T any](org *T, def T) T {
 	if org != nil {

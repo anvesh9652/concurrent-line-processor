@@ -1,4 +1,4 @@
-package main
+package concurrentlineprocessor
 
 import (
 	"bytes"
@@ -24,10 +24,10 @@ var (
 	defaultChanSize = 50
 )
 
-// NewReader creates a parallel reader.
-func NewReader(r io.Reader, opts ...Option) *ParallelReader {
+// NewConcurrentLineProcessor creates a parallel reader.
+func NewConcurrentLineProcessor(r io.Reader, opts ...Option) *ConcurrentLineProcessor {
 	pr, pw := io.Pipe()
-	p := &ParallelReader{
+	p := &ConcurrentLineProcessor{
 		srcReader:     r,
 		workers:       DefaultWorkers,
 		chunkSize:     DefaultChunkSize,
@@ -53,19 +53,19 @@ func NewReader(r io.Reader, opts ...Option) *ParallelReader {
 	return p
 }
 
-func (p *ParallelReader) Read(b []byte) (int, error) {
+func (p *ConcurrentLineProcessor) Read(b []byte) (int, error) {
 	return p.pr.Read(b)
 }
 
-func (p *ParallelReader) Metrics() Metrics {
+func (p *ConcurrentLineProcessor) Metrics() Metrics {
 	return p.metrics
 }
 
-func (p *ParallelReader) RowsRead() int {
+func (p *ConcurrentLineProcessor) RowsRead() int {
 	return int(atomic.LoadInt64(&p.metrics.RowsRead))
 }
 
-func (p *ParallelReader) start() {
+func (p *ConcurrentLineProcessor) start() {
 	now := time.Now()
 	eg, ctx := errgroup.WithContext(context.Background())
 	eg.Go(func() error { return p.readAsChunks(ctx) })
@@ -87,7 +87,7 @@ func (p *ParallelReader) start() {
 	p.pw.CloseWithError(err)
 }
 
-func (p *ParallelReader) readAsChunks(ctx context.Context) error {
+func (p *ConcurrentLineProcessor) readAsChunks(ctx context.Context) error {
 	var (
 		leftOver = make([]byte, 0, p.chunkSize*2)
 		buff     = make([]byte, p.chunkSize)
@@ -136,7 +136,7 @@ func (p *ParallelReader) readAsChunks(ctx context.Context) error {
 	return nil
 }
 
-func (p *ParallelReader) processChunks(ctx context.Context) error {
+func (p *ConcurrentLineProcessor) processChunks(ctx context.Context) error {
 	defer close(p.outStream)
 	poolErrG, ctxEg := errgroup.WithContext(ctx)
 	for range p.workers {
@@ -158,7 +158,7 @@ func (p *ParallelReader) processChunks(ctx context.Context) error {
 	return poolErrG.Wait()
 }
 
-func (p *ParallelReader) processChunk(ctx context.Context, chunk *Chunk) error {
+func (p *ConcurrentLineProcessor) processChunk(ctx context.Context, chunk *Chunk) error {
 	lineStart := 0
 
 	buff := p.pool.Get().(*[]byte)
@@ -181,7 +181,7 @@ func (p *ParallelReader) processChunk(ctx context.Context, chunk *Chunk) error {
 	return sendToStream(ctx, p.outStream, &Chunk{id: chunk.id, data: buff})
 }
 
-func (p *ParallelReader) readProcessedData(ctx context.Context) error {
+func (p *ConcurrentLineProcessor) readProcessedData(ctx context.Context) error {
 	for {
 		chunk, err := getFromStream(ctx, p.outStream)
 		if err != nil {
