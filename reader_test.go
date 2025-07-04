@@ -16,12 +16,12 @@ var files = []string{
 /*
 goos: darwin
 goarch: arm64
-pkg: github.com/anvesh9652/parallel-reader
+pkg: github.com/anvesh9652/concurrent-line-processor
 cpu: Apple M1 Pro
-BenchmarkNormalReader/NormalReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/parallel-reader/data/temp_example.csv-10         	    9636	    113762 ns/op	     209 B/op	       4 allocs/op
-BenchmarkNormalReader/NormalReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/parallel-reader/tmp/2024-06-04-detail.jsonl-10   	     568	   2678503 ns/op	     239 B/op	       4 allocs/op
+BenchmarkNormalReader/NormalReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv-10         	    9636	    113762 ns/op	     209 B/op	       4 allocs/op
+BenchmarkNormalReader/NormalReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-detail.jsonl-10   	     568	   2678503 ns/op	     239 B/op	       4 allocs/op
 PASS
-ok  	github.com/anvesh9652/parallel-reader	2.935s
+ok  	github.com/anvesh9652/concurrent-line-processor	2.935s
 */
 
 func BenchmarkNormalReader(b *testing.B) {
@@ -41,12 +41,12 @@ func BenchmarkNormalReader(b *testing.B) {
 
 goos: darwin
 goarch: arm64
-pkg: github.com/anvesh9652/parallel-reader
+pkg: github.com/anvesh9652/concurrent-line-processor
 cpu: Apple M1 Pro
-BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/parallel-reader/data/temp_example.csv-10         	    3910	    292472 ns/op	  514618 B/op	      66 allocs/op
-BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/parallel-reader/tmp/2024-06-04-detail.jsonl-10   	     105	  10877019 ns/op	21814051 B/op	    2956 allocs/op
+BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv-10         	    3910	    292472 ns/op	  514618 B/op	      66 allocs/op
+BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-detail.jsonl-10   	     105	  10877019 ns/op	21814051 B/op	    2956 allocs/op
 PASS
-ok  	github.com/anvesh9652/parallel-reader	2.818s
+ok  	github.com/anvesh9652/concurrent-line-processor	2.818s
 */
 
 func BenchmarkParallelReader(b *testing.B) {

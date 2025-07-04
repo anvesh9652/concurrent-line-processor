@@ -1,4 +1,4 @@
-module github.com/anvesh9652/parallel-reader
+module github.com/anvesh9652/concurrent-line-processor
 
 go 1.24.0
 
