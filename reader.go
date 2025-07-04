@@ -1,3 +1,41 @@
+// Package concurrentlineprocessor provides a high-performance, concurrent line-by-line processor for large files or streams.
+//
+// This package allows you to efficiently process large files or streams by splitting the input into chunks and processing each line concurrently using multiple goroutines.
+//
+// # Features
+//   - Concurrent processing of lines using a configurable number of workers (goroutines)
+//   - Custom line processor function for transforming or filtering lines
+//   - Metrics reporting (bytes read, rows read, processing time, etc.)
+//   - Optional row read limit
+//
+// # Basic Usage
+//
+//	import (
+//	    "os"
+//	    clp "github.com/anvesh9652/concurrent-line-processor"
+//	)
+//
+//	f, err := os.Open("largefile.txt")
+//	clp.ExistOnError(err)
+//	defer f.Close()
+//	pr := clp.NewConcurrentLineProcessor(f, clp.WithWorkers(4), clp.WithChunkSize(1024*1024))
+//	output, err := io.ReadAll(pr)
+//	clp.ExistOnError(err)
+//	fmt.Println(string(output))
+//
+// # Custom Line Processing
+//
+//	pr := clp.NewConcurrentLineProcessor(f, clp.WithCustomLineProcessor(func(line []byte) ([]byte, error) {
+//	    // Transform or filter the line
+//	    return bytes.ToUpper(line), nil
+//	}))
+//
+// # Metrics
+//
+//	metrics := pr.Metrics()
+//	fmt.Printf("Rows read: %d, Bytes read: %d, Time took: %s\n", metrics.RowsRead, metrics.BytesRead, metrics.TimeTook)
+//
+// For more advanced usage, see the examples/ directory.
 package concurrentlineprocessor
 
 import (
