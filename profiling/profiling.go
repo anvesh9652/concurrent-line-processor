@@ -33,7 +33,6 @@ func cpuProfile() {
 func memProfile() {
 	if mporfile != nil {
 		mf, _ := os.Create("./profiling/" + *mporfile + ".prof")
-
 		runtime.GC()
 		if err := pprof.WriteHeapProfile(mf); err != nil {
 			log.Fatal(err)

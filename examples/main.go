@@ -20,9 +20,10 @@ func main() {
 }
 
 func start() {
-	r, err := os.Open(clp.Files[2])
+	r, err := os.Open(clp.Files[1])
 	clp.ExitOnError(err)
 	defer r.Close()
 
 	GetAllKeys(r)
+	// ConvertCSVToJsonl(r)
 }

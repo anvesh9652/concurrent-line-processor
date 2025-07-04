@@ -51,7 +51,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// TODO: Need to reduce the number of memory allocations
+// TODO:
+// 	- Need to reduce the number of memory allocations
+//  - Probably provide chunk id and row id to the custom line processor
+//  - Option to skip first n lines
 
 var (
 	DefaultChunkSize = 1024 * 30 // 30 KB
