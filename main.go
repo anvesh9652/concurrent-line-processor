@@ -41,16 +41,15 @@ func start() {
 
 	// keys := map[string]bool{}
 	customProcessor := func(b []byte) ([]byte, error) {
-		// return processByte(b)
+		// return processByte(b, keys)
 		return b, nil
 	}
 
 	nr := NewReader(r, WithChunkSize(1024*1024*4), WithWorkers(8), WithCustomLineProcessor(customProcessor))
 	_, err = io.Copy(io.Discard, nr)
 	ExistOnError(err)
-	ExistOnError(nr.Error())
-	fmt.Println(nr.RowsRead())
-	// PrintAsJsonString(keys)
+	fmt.Println("Rows Read:", nr.RowsRead())
+	PrintAsJsonString(nr.Metrics())
 }
 
 func cpuProfile() {
@@ -85,5 +84,6 @@ func processByte(b []byte, keys map[string]bool) ([]byte, error) {
 		keys[k] = true
 	}
 	mut.Unlock()
-	return b, nil
+	d["test_key"] = "temp value"
+	return json.Marshal(d)
 }

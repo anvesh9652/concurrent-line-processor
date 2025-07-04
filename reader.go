@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -18,6 +20,8 @@ var (
 	// DefaultWorkers is the number of goroutines to use for processing chunks
 	DefaultWorkers  = runtime.NumCPU()
 	defaultChanSize = 50
+
+	errTest = errors.New("this is test error")
 )
 
 // NewReader creates parallel reader
@@ -40,8 +44,7 @@ func NewReader(r io.Reader, opts ...Option) *ParallelReader {
 			},
 		},
 
-		pr: pr,
-		pw: pw,
+		pr: pr, pw: pw,
 
 		customLineProcessor: func(b []byte) ([]byte, error) { return b, nil },
 	}
@@ -56,10 +59,10 @@ func NewReader(r io.Reader, opts ...Option) *ParallelReader {
 }
 
 func (p *ParallelReader) start() {
-	eg := errgroup.Group{}
-	eg.Go(p.readAsChunks)
-	eg.Go(p.processChunks)
-	eg.Go(p.readProcessedData)
+	eg, ctx := errgroup.WithContext(context.Background())
+	eg.Go(func() error { return p.readAsChunks(ctx) })
+	eg.Go(func() error { return p.processChunks(ctx) })
+	eg.Go(func() error { return p.readProcessedData(ctx) })
 	go func() {
 		t := time.NewTicker(5 * time.Second)
 		start := time.Now()
@@ -68,30 +71,30 @@ func (p *ParallelReader) start() {
 		}
 	}()
 
-	// p.err = eg.Wait()
-	if err := eg.Wait(); err != nil {
-		p.err = err
-	}
+	p.pw.CloseWithError(eg.Wait())
 }
 
 func (p *ParallelReader) Read(b []byte) (int, error) {
 	return p.pr.Read(b)
 }
 
-func (p *ParallelReader) readAsChunks() error {
+func (p *ParallelReader) readAsChunks(ctx context.Context) error {
 	var (
 		leftOver = make([]byte, 0, p.chunkSize*2)
 		buff     = make([]byte, p.chunkSize)
 		chunkID  = 1
 	)
 	defer close(p.inStream)
+
 	for {
 		read, err := p.srcReader.Read(buff)
-		p.Metrics.BytesRead += read
+		p.metrics.BytesRead += int64(read)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				if len(leftOver) != 0 {
-					p.inStream <- &Chunk{id: chunkID, data: &leftOver}
+					if err := sendToStream(ctx, p.inStream, &Chunk{id: chunkID, data: &leftOver}); err != nil {
+						return err
+					}
 				}
 				break
 			}
@@ -111,29 +114,38 @@ func (p *ParallelReader) readAsChunks() error {
 
 		leftOver = append(leftOver[:0], currBuff[ind+1:]...)
 
-		p.inStream <- &Chunk{id: chunkID, data: &copyToSend}
+		if err := sendToStream(ctx, p.inStream, &Chunk{id: chunkID, data: &copyToSend}); err != nil {
+			return err
+		}
+
 		chunkID++
 	}
 	return nil
 }
 
-func (p *ParallelReader) processChunks() error {
+func (p *ParallelReader) processChunks(ctx context.Context) error {
 	defer close(p.outStream)
-	poolErrG := errgroup.Group{}
+	poolErrG, ctxEg := errgroup.WithContext(ctx)
 	for range p.workers {
 		poolErrG.Go(func() error {
-			for chunk := range p.inStream {
-				if err := p.processChunk(chunk); err != nil {
+			for {
+				chunk, err := getFromStream(ctxEg, p.inStream)
+				if err != nil {
+					return err
+				}
+				if chunk == nil {
+					return nil
+				}
+				if err := p.processChunk(ctxEg, chunk); err != nil {
 					return err
 				}
 			}
-			return nil
 		})
 	}
 	return poolErrG.Wait()
 }
 
-func (p *ParallelReader) processChunk(chunk *Chunk) error {
+func (p *ParallelReader) processChunk(ctx context.Context, chunk *Chunk) error {
 	lineStart := 0
 
 	buff := p.pool.Get().(*[]byte)
@@ -151,19 +163,24 @@ func (p *ParallelReader) processChunk(chunk *Chunk) error {
 			lineStart = i + 1
 		}
 	}
-	p.sendToStream(&Chunk{id: chunk.id, data: buff})
-	return nil
+	return sendToStream(ctx, p.outStream, &Chunk{id: chunk.id, data: buff})
 }
 
-func (p *ParallelReader) readProcessedData() error {
-	defer p.pw.Close()
-	for chunk := range p.outStream {
+func (p *ParallelReader) readProcessedData(ctx context.Context) error {
+	for {
+		chunk, err := getFromStream(ctx, p.outStream)
+		if err != nil {
+			return err
+		}
+		if chunk == nil {
+			break
+		}
+
 		buff := chunk.data
-		p.Metrics.RowsRead += int64(bytes.Count(*buff, []byte("\n")))
-		p.Metrics.TransformedBytes += len(*buff)
+		atomic.AddInt64(&p.metrics.RowsRead, int64(bytes.Count(*buff, []byte("\n"))))
+		atomic.AddInt64(&p.metrics.TransformedBytes, int64(len(*buff)))
 
 		if _, err := p.pw.Write(*buff); err != nil {
-			p.pw.CloseWithError(err)
 			return err
 		}
 
@@ -176,14 +193,28 @@ func (p *ParallelReader) readProcessedData() error {
 	return nil
 }
 
-func (p *ParallelReader) sendToStream(c *Chunk) {
-	p.outStream <- c
+func sendToStream(ctx context.Context, s chan *Chunk, c *Chunk) error {
+	select {
+	case s <- c:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
+}
+
+func getFromStream(ctx context.Context, s chan *Chunk) (*Chunk, error) {
+	select {
+	case chunk := <-s:
+		return chunk, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (p *ParallelReader) Metrics() Metrics {
+	return p.metrics
 }
 
 func (p *ParallelReader) RowsRead() int {
-	return int(p.Metrics.RowsRead)
-}
-
-func (p *ParallelReader) Error() error {
-	return p.err
+	return int(atomic.LoadInt64(&p.metrics.RowsRead))
 }

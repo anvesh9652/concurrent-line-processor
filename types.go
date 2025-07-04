@@ -16,8 +16,8 @@ type Chunk struct {
 }
 
 type Metrics struct {
-	BytesRead        int
-	TransformedBytes int
+	BytesRead        int64
+	TransformedBytes int64
 	RowsRead         int64
 }
 
@@ -39,7 +39,5 @@ type ParallelReader struct {
 	pr *io.PipeReader
 	pw *io.PipeWriter
 
-	err error
-
-	Metrics Metrics
+	metrics Metrics
 }

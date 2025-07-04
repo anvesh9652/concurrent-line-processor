@@ -17,7 +17,7 @@ func IFNull[T any](org *T, def T) T {
 
 func ExistOnError(err error) {
 	if err != nil {
-		fmt.Printf("Error: %s, \nError Stack: %s\n", err.Error(), string(debug.Stack()))
+		fmt.Fprintf(os.Stdout, "Error: %s\n", err)
 		os.Exit(1)
 	}
 }
@@ -27,7 +27,7 @@ func WithNewLine(data []byte) []byte {
 }
 
 func ErrWithDebugStack(err error) error {
-	return errors.Join(err, fmt.Errorf("debug logs: %s", debug.Stack()))
+	return errors.Join(err, fmt.Errorf("Debug Error Statck: %s\n", debug.Stack()))
 }
 
 func PrintAsJsonString(d any) {
