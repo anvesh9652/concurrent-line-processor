@@ -1,6 +1,9 @@
 package main
 
-import "io"
+import (
+	"io"
+	"sync"
+)
 
 type (
 	Option        func(*ParallelReader)
@@ -9,22 +12,36 @@ type (
 
 type Chunk struct {
 	id   int
-	data []byte
+	data *[]byte
+}
+
+// type OutChunk struct {
+// 	id   int
+// 	data *[]byte
+// }
+
+type Metrics struct {
+	BytesRead        int
+	TransformedBytes int
+	RowsRead         int64
 }
 
 type ParallelReader struct {
 	r         io.Reader
 	chunkSize int
 	workers   int
-	rowsRead  int64
 
 	customLineProcessor LineProcessor
 
 	inStream  chan *Chunk
 	outStream chan *Chunk
 
+	pool sync.Pool
+
 	rowsReadLimit int
 
 	pr *io.PipeReader
 	pw *io.PipeWriter
+
+	Metrics Metrics
 }
