@@ -68,8 +68,9 @@ func (p *ParallelReader) start() {
 		}
 	}()
 
+	// p.err = eg.Wait()
 	if err := eg.Wait(); err != nil {
-		p.pw.CloseWithError(err)
+		p.err = err
 	}
 }
 
@@ -119,7 +120,7 @@ func (p *ParallelReader) readAsChunks() error {
 func (p *ParallelReader) processChunks() error {
 	defer close(p.outStream)
 	poolErrG := errgroup.Group{}
-	for range p.workers + 2 {
+	for range p.workers {
 		poolErrG.Go(func() error {
 			for chunk := range p.inStream {
 				if err := p.processChunk(chunk); err != nil {
@@ -162,6 +163,7 @@ func (p *ParallelReader) readProcessedData() error {
 		p.Metrics.TransformedBytes += len(*buff)
 
 		if _, err := p.pw.Write(*buff); err != nil {
+			p.pw.CloseWithError(err)
 			return err
 		}
 
@@ -180,4 +182,8 @@ func (p *ParallelReader) sendToStream(c *Chunk) {
 
 func (p *ParallelReader) RowsRead() int {
 	return int(p.Metrics.RowsRead)
+}
+
+func (p *ParallelReader) Error() error {
+	return p.err
 }

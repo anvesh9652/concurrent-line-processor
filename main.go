@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"sync"
 	"time"
 )
 
@@ -20,6 +22,8 @@ var (
 var (
 	cporfile = flag.String("cprofile", "cpuprofile", " ")
 	mporfile = flag.String("mprofile", "memprofile", " ")
+
+	mut = sync.Mutex{}
 )
 
 func main() {
@@ -34,14 +38,19 @@ func main() {
 func start() {
 	r, err := os.Open(file4)
 	ExistOnError(err)
+
+	// keys := map[string]bool{}
 	customProcessor := func(b []byte) ([]byte, error) {
+		// return processByte(b)
 		return b, nil
 	}
 
-	nr := NewReader(r, WithChunkSize(1024*1024*30), WithCustomLineProcessor(customProcessor))
+	nr := NewReader(r, WithChunkSize(1024*1024*4), WithWorkers(8), WithCustomLineProcessor(customProcessor))
 	_, err = io.Copy(io.Discard, nr)
 	ExistOnError(err)
+	ExistOnError(nr.Error())
 	fmt.Println(nr.RowsRead())
+	// PrintAsJsonString(keys)
 }
 
 func cpuProfile() {
@@ -63,4 +72,18 @@ func memProfile() {
 		}
 		defer mf.Close()
 	}
+}
+
+func processByte(b []byte, keys map[string]bool) ([]byte, error) {
+	var d map[string]any
+	if err := json.Unmarshal(b, &d); err != nil {
+		return nil, err
+	}
+
+	mut.Lock()
+	for k := range d {
+		keys[k] = true
+	}
+	mut.Unlock()
+	return b, nil
 }

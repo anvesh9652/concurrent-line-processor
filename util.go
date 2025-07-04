@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -27,4 +28,9 @@ func WithNewLine(data []byte) []byte {
 
 func ErrWithDebugStack(err error) error {
 	return errors.Join(err, fmt.Errorf("debug logs: %s", debug.Stack()))
+}
+
+func PrintAsJsonString(d any) {
+	b, _ := json.MarshalIndent(d, "", "  ")
+	fmt.Println(string(b))
 }

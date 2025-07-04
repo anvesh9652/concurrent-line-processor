@@ -39,5 +39,7 @@ type ParallelReader struct {
 	pr *io.PipeReader
 	pw *io.PipeWriter
 
+	err error
+
 	Metrics Metrics
 }
