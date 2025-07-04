@@ -19,14 +19,14 @@ var Files = []string{
 	"/Users/agali/Desktop/Work/go-lang/tryouts/1brc/src_data.txt",
 }
 
-func IFNull[T any](org *T, def T) T {
+func IfNull[T any](org *T, def T) T {
 	if org != nil {
 		return *org
 	}
 	return def
 }
 
-func ExistOnError(err error) {
+func ExitOnError(err error) {
 	if err != nil {
 		fmt.Fprintf(os.Stdout, "Error: %s\n", err)
 		os.Exit(1)

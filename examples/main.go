@@ -21,7 +21,7 @@ func main() {
 
 func start() {
 	r, err := os.Open(clp.Files[2])
-	clp.ExistOnError(err)
+	clp.ExitOnError(err)
 	defer r.Close()
 
 	GetAllKeys(r)

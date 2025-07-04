@@ -18,7 +18,7 @@ func GetAllKeys(r io.Reader) {
 		clp.WithCustomLineProcessor(customProcessor),
 	)
 	_, err := io.Copy(io.Discard, nr)
-	clp.ExistOnError(err)
+	clp.ExitOnError(err)
 	clp.PrintAsJsonString(keys)
 	clp.PrintAsJsonString(nr.Metrics())
 }
