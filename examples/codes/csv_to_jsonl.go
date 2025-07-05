@@ -1,4 +1,4 @@
-package main
+package codes
 
 import (
 	"bufio"
@@ -12,7 +12,8 @@ import (
 	clp "github.com/anvesh9652/concurrent-line-processor"
 )
 
-func initConvertCtoJ(r io.Reader) {
+func InitConvertCtoJ(r io.Reader) {
+
 	tf, err := os.Create("/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/test_conv.jsonl")
 	clp.ExitOnError(err)
 	defer tf.Close()

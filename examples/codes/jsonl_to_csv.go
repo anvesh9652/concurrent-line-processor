@@ -1,4 +1,4 @@
-package main
+package codes
 
 import (
 	"encoding/json"
@@ -11,7 +11,7 @@ import (
 	clp "github.com/anvesh9652/concurrent-line-processor"
 )
 
-func initConvertJtoC(file string) {
+func InitConvertJtoC(file string) {
 	f, err := os.Open(file)
 	clp.ExitOnError(err)
 	defer f.Close()
@@ -42,6 +42,7 @@ func ConvertJsonlToCsv(columns []string, r io.Reader, w io.Writer) error {
 			row = append(row, ConvertAnyToString(d[col]))
 		}
 		return []byte(strings.Join(row, ",")), nil
+
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,

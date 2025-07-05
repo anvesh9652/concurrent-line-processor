@@ -3,18 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
-	"sync"
 	"time"
 
 	clp "github.com/anvesh9652/concurrent-line-processor"
+	. "github.com/anvesh9652/concurrent-line-processor/examples/codes"
 	"github.com/anvesh9652/concurrent-line-processor/profiling"
-)
-
-var (
-	workers   = 8
-	chunkSize = 1024 * 1024 * 4 // 4 MB
-
-	mut = sync.Mutex{}
 )
 
 func main() {
@@ -27,9 +20,9 @@ func start() {
 	defer r.Close()
 
 	withTiming(func() {
-		// GetAllKeys(r)
-		// initConvertCtoJ(r)
-		initConvertJtoC(clp.Files[2])
+		// GetAllKeys(r, -1)
+		// InitConvertCtoJ(r)
+		InitConvertJtoC(clp.Files[2])
 	})
 }
 
