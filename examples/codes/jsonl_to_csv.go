@@ -1,6 +1,8 @@
 package codes
 
 import (
+	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,7 +25,7 @@ func InitConvertJtoC(file string) {
 	clp.ExitOnError(err)
 	defer f.Close()
 
-	tf, err := os.Create("/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/test_conv.jsonl")
+	tf, err := os.Create("/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/test_conv.csv")
 	clp.ExitOnError(err)
 	defer tf.Close()
 
@@ -41,8 +43,15 @@ func ConvertJsonlToCsv(columns []string, r io.Reader, w io.Writer) error {
 		for _, col := range columns {
 			row = append(row, ConvertAnyToString(d[col]))
 		}
-		return []byte(strings.Join(row, ",")), nil
-
+		buff := bytes.NewBuffer(nil)
+		cw := csv.NewWriter(buff)
+		if err := cw.Write(row); err != nil {
+			return nil, err
+		}
+		cw.Flush()
+		// When we write a row to the CSV writer, it appends a newline character at the end.
+		// We need to remove that newline character before returning the byte slice.
+		return buff.Bytes()[:buff.Len()-1], nil
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
@@ -50,7 +59,7 @@ func ConvertJsonlToCsv(columns []string, r io.Reader, w io.Writer) error {
 		clp.WithCustomLineProcessor(customProcessor),
 	)
 
-	if _, err := w.Write([]byte(strings.Join(columns, ","))); err != nil {
+	if _, err := w.Write([]byte(strings.Join(columns, ",") + "\n")); err != nil {
 		return err
 	}
 
