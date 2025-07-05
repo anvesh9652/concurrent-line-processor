@@ -12,20 +12,17 @@ import (
 	clp "github.com/anvesh9652/concurrent-line-processor"
 )
 
-func ConvertCSVToJsonl(r io.Reader) {
-	// read frist row to headers
-	var firstLine []byte
-	br := bufio.NewReader(r)
-	for {
-		line, isLine, err := br.ReadLine()
-		firstLine = append(firstLine, line...)
-		clp.ExitOnError(err)
-		if !isLine {
-			break
-		}
-	}
+func initConvertCtoJ(r io.Reader) {
+	tf, err := os.Create("/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/test_conv.jsonl")
+	clp.ExitOnError(err)
+	defer tf.Close()
 
-	cols := strings.Split(string(firstLine), ",")
+	clp.ExitOnError(ConvertCSVToJsonl(r, tf))
+}
+
+// The reader should have header column
+func ConvertCSVToJsonl(r io.Reader, w io.Writer) error {
+	cols, r := getColumns(r)
 	customProcessor := func(b []byte) ([]byte, error) {
 		cr := csv.NewReader(bytes.NewBuffer(b))
 		row, err := cr.Read()
@@ -39,16 +36,28 @@ func ConvertCSVToJsonl(r io.Reader) {
 		return json.Marshal(md)
 	}
 
-	nr := clp.NewConcurrentLineProcessor(br,
+	nr := clp.NewConcurrentLineProcessor(r,
 		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers), clp.WithRowsReadLimit(-1),
 		clp.WithCustomLineProcessor(customProcessor),
 	)
 
-	tf, err := os.Create("/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/test_conv.jsonl")
-	clp.ExitOnError(err)
-	defer tf.Close()
+	if _, err := io.Copy(w, nr); err != nil {
+		return err
+	}
+	// clp.PrintAsJsonString(nr.Metrics())
+	return nil
+}
 
-	_, err = io.Copy(tf, nr)
-	clp.ExitOnError(err)
-	clp.PrintAsJsonString(nr.Metrics())
+func getColumns(r io.Reader) ([]string, io.Reader) {
+	var firstLine []byte
+	br := bufio.NewReader(r)
+	for {
+		line, isLine, err := br.ReadLine()
+		firstLine = append(firstLine, line...)
+		clp.ExitOnError(err)
+		if !isLine {
+			break
+		}
+	}
+	return strings.Split(string(firstLine), ","), br
 }

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	clp "github.com/anvesh9652/concurrent-line-processor"
 	"github.com/anvesh9652/concurrent-line-processor/profiling"
@@ -20,10 +22,19 @@ func main() {
 }
 
 func start() {
-	r, err := os.Open(clp.Files[1])
+	r, err := os.Open(clp.Files[0])
 	clp.ExitOnError(err)
 	defer r.Close()
 
-	GetAllKeys(r)
-	// ConvertCSVToJsonl(r)
+	withTiming(func() {
+		// GetAllKeys(r)
+		// initConvertCtoJ(r)
+		initConvertJtoC(clp.Files[2])
+	})
+}
+
+func withTiming(f func()) {
+	now := time.Now()
+	f()
+	fmt.Println("Total time took:", time.Since(now))
 }
