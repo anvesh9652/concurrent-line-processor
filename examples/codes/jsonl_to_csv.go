@@ -32,6 +32,28 @@ func InitConvertJtoC(file string) {
 	clp.ExitOnError(ConvertJsonlToCsv(cols, f, tf))
 }
 
+func GetAllKeys(r io.Reader, rowsLimit int) ([]string, error) {
+	keys := map[string]bool{}
+	customProcessor := func(b []byte) ([]byte, error) {
+		return processBytes(b, keys)
+	}
+
+	nr := clp.NewConcurrentLineProcessor(r,
+		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers), clp.WithRowsReadLimit(rowsLimit),
+		clp.WithCustomLineProcessor(customProcessor),
+	)
+	if _, err := io.Copy(io.Discard, nr); err != nil {
+		return nil, err
+	}
+
+	var columns []string
+	for k := range keys {
+		columns = append(columns, k)
+	}
+	// clp.PrintAsJsonString(nr.Metrics())
+	return columns, nil
+}
+
 // These functions can be reusalbe outside of this pacakge
 func ConvertJsonlToCsv(columns []string, r io.Reader, w io.Writer) error {
 	customProcessor := func(b []byte) ([]byte, error) {
@@ -66,28 +88,6 @@ func ConvertJsonlToCsv(columns []string, r io.Reader, w io.Writer) error {
 	_, err := io.Copy(w, nr)
 	// clp.PrintAsJsonString(nr.Metrics())
 	return err
-}
-
-func GetAllKeys(r io.Reader, rowsLimit int) ([]string, error) {
-	keys := map[string]bool{}
-	customProcessor := func(b []byte) ([]byte, error) {
-		return processBytes(b, keys)
-	}
-
-	nr := clp.NewConcurrentLineProcessor(r,
-		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers), clp.WithRowsReadLimit(rowsLimit),
-		clp.WithCustomLineProcessor(customProcessor),
-	)
-	if _, err := io.Copy(io.Discard, nr); err != nil {
-		return nil, err
-	}
-
-	var columns []string
-	for k := range keys {
-		columns = append(columns, k)
-	}
-	// clp.PrintAsJsonString(nr.Metrics())
-	return columns, nil
 }
 
 func processBytes(b []byte, keys map[string]bool) ([]byte, error) {

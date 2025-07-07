@@ -77,6 +77,8 @@ func NewConcurrentLineProcessor(r io.Reader, opts ...Option) *ConcurrentLineProc
 		inStream:  make(chan *Chunk, defaultChanSize),
 		outStream: make(chan *Chunk, defaultChanSize),
 
+		stopAll: make(chan bool),
+
 		pr: pr, pw: pw,
 
 		customLineProcessor: func(b []byte) ([]byte, error) { return b, nil },
@@ -109,15 +111,24 @@ func (p *ConcurrentLineProcessor) RowsRead() int {
 
 func (p *ConcurrentLineProcessor) start() {
 	now := time.Now()
-	eg, ctx := errgroup.WithContext(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return p.readAsChunks(ctx) })
 	eg.Go(func() error { return p.processChunks(ctx) })
 	eg.Go(func() error { return p.readProcessedData(ctx) })
+
+	go func() {
+		<-p.stopAll
+		cancel()
+	}()
 
 	// Learning: if a goroutine returns an error, and the other goroutines are still running.
 	// we will not get any error on eg.Wait() if we don't use errgroup with context.
 	err := eg.Wait()
 	p.metrics.TimeTook = time.Since(now).String()
+	if err != nil && err == context.Canceled {
+		err = nil
+	}
 	p.pw.CloseWithError(err)
 }
 
@@ -266,6 +277,11 @@ func (p *ConcurrentLineProcessor) readProcessedData(ctx context.Context) error {
 			break
 		}
 	}
+	// I we do not know both readAsChunks and readProcessedData are done, but processChunks doesn't know everything
+	// is done, and it also doesn't close the outStream channel, keeps on sending data to it and once buff chan fills up,
+	// and we infinitely wait for it to be read, resulting in deadlock. and this stopAll channel is used to signal
+	// that we are done with everything and we can stop all the goroutines.
+	p.stopAll <- true
 	return nil
 }
 

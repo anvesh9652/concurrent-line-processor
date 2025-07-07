@@ -55,6 +55,8 @@ type ConcurrentLineProcessor struct {
 	pr *io.PipeReader
 	pw *io.PipeWriter
 
+	stopAll chan bool
+
 	// metrics holds the metrics of the reading process, such as bytes read, transformed bytes, and rows read.
 	metrics Metrics
 }
