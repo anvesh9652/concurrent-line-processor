@@ -57,14 +57,39 @@ import (
 //  - Option to skip first n lines
 
 var (
+	// DefaultChunkSize is the default size for reading chunks from the source (30KB).
+	// This provides a good balance between memory usage and performance for most use cases.
 	DefaultChunkSize = 1024 * 30 // 30 KB
 
-	// DefaultWorkers is the number of goroutines used for processing chunks
+	// DefaultWorkers is the default number of goroutines used for processing chunks.
+	// It defaults to the number of CPU cores available.
 	DefaultWorkers  = runtime.NumCPU()
 	defaultChanSize = 50
 )
 
 // NewConcurrentLineProcessor creates a new ConcurrentLineProcessor that reads from the provided io.Reader.
+// It starts processing immediately in background goroutines and returns a processor that implements io.Reader.
+//
+// The processor splits input into chunks, processes each line concurrently using multiple workers,
+// and provides the processed output through the Read method.
+//
+// Example:
+//
+//	file, err := os.Open("large-file.txt")
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	defer file.Close()
+//
+//	processor := clp.NewConcurrentLineProcessor(file,
+//		clp.WithWorkers(8),
+//		clp.WithChunkSize(1024*1024),
+//	)
+//
+//	output, err := io.ReadAll(processor)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
 func NewConcurrentLineProcessor(r io.Reader, opts ...Option) *ConcurrentLineProcessor {
 	pr, pw := io.Pipe()
 	p := &ConcurrentLineProcessor{
@@ -95,10 +120,14 @@ func NewConcurrentLineProcessor(r io.Reader, opts ...Option) *ConcurrentLineProc
 	return p
 }
 
+// Read implements io.Reader interface, allowing the processed data to be read
+// using standard Go I/O patterns like io.Copy, io.ReadAll, bufio.Scanner, etc.
 func (p *ConcurrentLineProcessor) Read(b []byte) (int, error) {
 	return p.pr.Read(b)
 }
 
+// Metrics returns the current processing metrics including bytes read, rows processed,
+// and total processing time. The metrics are safe to access concurrently.
 func (p *ConcurrentLineProcessor) Metrics() Metrics {
 	return Metrics{
 		RowsRead:         atomic.LoadInt64(&p.metrics.RowsRead),
@@ -108,6 +137,8 @@ func (p *ConcurrentLineProcessor) Metrics() Metrics {
 	}
 }
 
+// RowsRead returns the current number of rows that have been read from the source.
+// This value is updated atomically and is safe to call concurrently.
 func (p *ConcurrentLineProcessor) RowsRead() int {
 	return int(atomic.LoadInt64(&p.metrics.RowsRead))
 }

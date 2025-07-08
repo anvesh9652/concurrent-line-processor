@@ -11,7 +11,8 @@ import (
 	"runtime/debug"
 )
 
-// Test files List
+// Files contains a list of test files used for development and testing.
+// This variable is used internally for testing and benchmarking purposes.
 var Files = []string{
 	"/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv",
 	"/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-details.jsonl",

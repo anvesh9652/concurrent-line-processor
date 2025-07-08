@@ -3,35 +3,65 @@
 // See reader.go for full package documentation and usage examples.
 package concurrentlineprocessor
 
-// WithOpts applies the given options to the ParallelReader.
+// WithOpts applies the given options to the ConcurrentLineProcessor.
+// This is a convenience function for applying multiple options at once.
 func WithOpts(p *ConcurrentLineProcessor, opts ...Option) {
 	for _, opt := range opts {
 		opt(p)
 	}
 }
 
-// WithChunkSize sets the chunk size for the ParallelReader.
+// WithChunkSize sets the chunk size for reading data from the source.
+// Larger chunk sizes can improve performance for large files but may use more memory.
+// The default chunk size is 30KB.
+//
+// Example:
+//
+//	clp.NewConcurrentLineProcessor(reader, clp.WithChunkSize(1024*1024)) // 1MB chunks
 func WithChunkSize(size int) Option {
 	return func(pr *ConcurrentLineProcessor) {
 		pr.chunkSize = size
 	}
 }
 
-// WithWorkers sets the number of workers for the ParallelReader.
+// WithWorkers sets the number of worker goroutines for concurrent processing.
+// More workers can improve performance for CPU-intensive line processing,
+// but may not help for I/O-bound operations. The default is runtime.NumCPU().
+//
+// Example:
+//
+//	clp.NewConcurrentLineProcessor(reader, clp.WithWorkers(8))
 func WithWorkers(n int) Option {
 	return func(pr *ConcurrentLineProcessor) {
 		pr.workers = n
 	}
 }
 
-// WithCustomLineProcessor sets a custom line processor for the ParallelReader.
+// WithCustomLineProcessor sets a custom function to process each line.
+// The function receives a line as []byte and should return the processed line.
+// The function must be thread-safe and should not modify external state
+// without proper synchronization.
+//
+// Example:
+//
+//	// Convert lines to uppercase
+//	processor := func(line []byte) ([]byte, error) {
+//	    return bytes.ToUpper(line), nil
+//	}
+//	clp.NewConcurrentLineProcessor(reader, clp.WithCustomLineProcessor(processor))
 func WithCustomLineProcessor(c LineProcessor) Option {
 	return func(pr *ConcurrentLineProcessor) {
 		pr.customLineProcessor = c
 	}
 }
 
-// WithRowsReadLimit sets the row read limit for the ParallelReader.
+// WithRowsReadLimit sets a limit on the number of rows to read from the source.
+// Use -1 for no limit (default). This is useful for processing only a subset
+// of a large file for testing or sampling purposes.
+//
+// Example:
+//
+//	clp.NewConcurrentLineProcessor(reader, clp.WithRowsReadLimit(1000)) // Process only first 1000 lines
 func WithRowsReadLimit(limit int) Option {
 	return func(pr *ConcurrentLineProcessor) {
 		pr.rowsReadLimit = limit

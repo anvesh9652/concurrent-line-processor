@@ -54,7 +54,7 @@ func GetAllKeys(r io.Reader, rowsLimit int) ([]string, error) {
 	return columns, nil
 }
 
-// These functions can be reusalbe outside of this pacakge
+// These functions can be reusalbe outside of this package
 func ConvertJsonlToCsv(columns []string, r io.Reader, w io.Writer) error {
 	customProcessor := func(b []byte) ([]byte, error) {
 		var d map[string]any
