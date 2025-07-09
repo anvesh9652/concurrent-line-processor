@@ -71,9 +71,7 @@ func ConvertJsonlToCsv(columns []string, r io.Reader, w io.Writer) error {
 			return nil, err
 		}
 		cw.Flush()
-		// When we write a row to the CSV writer, it appends a newline character at the end.
-		// We need to remove that newline character before returning the byte slice.
-		return buff.Bytes()[:buff.Len()-1], nil
+		return buff.Bytes(), nil
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,

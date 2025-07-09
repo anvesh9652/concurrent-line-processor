@@ -34,15 +34,18 @@ func ExitOnError(err error) {
 	}
 }
 
-func WithNewLine(data []byte) []byte {
-	return append(data, '\n')
+func WithNewLine(b []byte) []byte {
+	if len(b) > 0 && b[len(b)-1] != '\n' {
+		return append(b, '\n')
+	}
+	return b
 }
 
 func ErrWithDebugStack(err error) error {
 	return errors.Join(err, fmt.Errorf("Debug Error Stack: %s\n", debug.Stack()))
 }
 
-func PrintAsJsonString(d any) {
-	b, _ := json.MarshalIndent(d, "", "  ")
+func PrintAsJsonString(v any) {
+	b, _ := json.MarshalIndent(v, "", "  ")
 	fmt.Println(string(b))
 }

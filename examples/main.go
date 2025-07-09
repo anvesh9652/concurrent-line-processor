@@ -22,7 +22,7 @@ func start() {
 	withTiming(func() {
 		// GetAllKeys(r, -1)
 		// InitConvertCtoJ(r)
-		InitConvertJtoC(clp.Files[2])
+		InitConvertJtoC(clp.Files[1])
 	})
 }
 
