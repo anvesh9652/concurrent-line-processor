@@ -13,7 +13,7 @@ func WithOpts(p *ConcurrentLineProcessor, opts ...Option) {
 
 // WithChunkSize sets the chunk size for reading data from the source.
 // Larger chunk sizes can improve performance for large files but may use more memory.
-// The default chunk size is 30KB.
+// The default chunk size is 64KB.
 //
 // Example:
 //
@@ -65,5 +65,18 @@ func WithCustomLineProcessor(c LineProcessor) Option {
 func WithRowsReadLimit(limit int) Option {
 	return func(pr *ConcurrentLineProcessor) {
 		pr.rowsReadLimit = limit
+	}
+}
+
+// WithChannelSize sets the size of the channels used for input and output streams.
+// A larger channel size can improve throughput for high-volume data processing,
+// The default channel size is 100.
+//
+// Example:
+//
+//	clp.NewConcurrentLineProcessor(reader, clp.WithChannelSize(1000)) // 1000 items in channel
+func WithChannelSize(size int) Option {
+	return func(pr *ConcurrentLineProcessor) {
+		pr.channelSize = size
 	}
 }

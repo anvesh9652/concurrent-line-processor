@@ -48,9 +48,13 @@ type ConcurrentLineProcessor struct {
 
 	// chunkSize is the size of each chunk to be read from the source reader.
 	chunkSize int
+	// channelSize is the size of the channels used for input and output streams.
+	channelSize int
 	// workers is the number of goroutines that will process the input data.
 	// If you want sequential processing, set it to 1.
 	workers int
+	// rowsReadLimit is the limit on the number of rows to read. Default is -1, which means no limit.
+	rowsReadLimit int
 
 	// customLineProcessor allows you to process each line of the input data.
 	// It is not thread-safe. You can't update anything outside of the function unless you use a mutex.
@@ -60,9 +64,6 @@ type ConcurrentLineProcessor struct {
 	outStream chan *Chunk
 
 	pool sync.Pool
-
-	// rowsReadLimit is the limit on the number of rows to read. Default is -1, which means no limit.
-	rowsReadLimit int
 
 	pr *io.PipeReader
 	pw *io.PipeWriter

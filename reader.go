@@ -44,6 +44,7 @@ import (
 	"errors"
 	"io"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -51,20 +52,15 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// TODO:
-// 	- Need to reduce the number of memory allocations
-//  - Probably provide chunk id and row id to the custom line processor
-//  - Option to skip first n lines
-
 var (
-	// DefaultChunkSize is the default size for reading chunks from the source (30KB).
+	// defaultChunkSize is the default size for reading chunks from the source (64KB).
 	// This provides a good balance between memory usage and performance for most use cases.
-	DefaultChunkSize = 1024 * 30 // 30 KB
+	defaultChunkSize = 1024 * 64 // 64 KB
 
-	// DefaultWorkers is the default number of goroutines used for processing chunks.
+	// defaultWorkers is the default number of goroutines used for processing chunks.
 	// It defaults to the number of CPU cores available.
-	DefaultWorkers  = runtime.NumCPU()
-	defaultChanSize = 50
+	defaultWorkers  = runtime.NumCPU()
+	defaultChanSize = 70
 )
 
 // NewConcurrentLineProcessor creates a new ConcurrentLineProcessor that reads from the provided io.Reader.
@@ -95,12 +91,10 @@ func NewConcurrentLineProcessor(r io.Reader, opts ...Option) *ConcurrentLineProc
 	p := &ConcurrentLineProcessor{
 		srcReader: r,
 
-		workers:       DefaultWorkers,
-		chunkSize:     DefaultChunkSize,
+		workers:       defaultWorkers,
+		chunkSize:     defaultChunkSize,
+		channelSize:   defaultChanSize,
 		rowsReadLimit: -1,
-
-		inStream:  make(chan *Chunk, defaultChanSize),
-		outStream: make(chan *Chunk, defaultChanSize),
 
 		pr: pr, pw: pw,
 
@@ -115,6 +109,9 @@ func NewConcurrentLineProcessor(r io.Reader, opts ...Option) *ConcurrentLineProc
 			return &b
 		},
 	}
+
+	p.inStream = make(chan *Chunk, p.channelSize)
+	p.outStream = make(chan *Chunk, p.channelSize)
 
 	go func() { p.start() }()
 	return p
@@ -138,9 +135,22 @@ func (p *ConcurrentLineProcessor) Metrics() Metrics {
 }
 
 // RowsRead returns the current number of rows that have been read from the source.
-// This value is updated atomically and is safe to call concurrently.
 func (p *ConcurrentLineProcessor) RowsRead() int {
 	return int(atomic.LoadInt64(&p.metrics.RowsRead))
+}
+
+// Summary returns a string summarizing the settings and metrics of the processor.
+// Note: time took is only updated after the processing is complete.
+func (p *ConcurrentLineProcessor) Summary() string {
+	metrics := p.Metrics()
+	return "chunkSize=" + FormatBytes(p.chunkSize) +
+		", workers=" + strconv.Itoa(p.workers) +
+		", channelSize=" + strconv.Itoa(p.channelSize) +
+		", rowsReadLimit=" + strconv.Itoa(p.rowsReadLimit) +
+		", rowsRead=" + strconv.FormatInt(metrics.RowsRead, 10) +
+		", transformedBytes=" + FormatBytes(int(metrics.TransformedBytes)) +
+		", bytesRead=" + FormatBytes(int(metrics.BytesRead)) +
+		", timeTook=" + metrics.TimeTook
 }
 
 func (p *ConcurrentLineProcessor) start() {
@@ -301,17 +311,13 @@ func (p *ConcurrentLineProcessor) putBuffToPool(buff *[]byte) {
 	p.pool.Put(buff)
 }
 
-// takes 1-based position ith of the byte in the data
-func ithBytePosition(data *[]byte, ith int, tar byte) int {
-	for i, b := range *data {
-		if b == tar {
-			ith--
-			if ith == 0 {
-				return i
-			}
-		}
+func getFromStream(ctx context.Context, s chan *Chunk) (*Chunk, error) {
+	select {
+	case chunk := <-s:
+		return chunk, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	return -1
 }
 
 func sendToStream(ctx context.Context, s chan *Chunk, c *Chunk) error {
@@ -323,13 +329,17 @@ func sendToStream(ctx context.Context, s chan *Chunk, c *Chunk) error {
 	return nil
 }
 
-func getFromStream(ctx context.Context, s chan *Chunk) (*Chunk, error) {
-	select {
-	case chunk := <-s:
-		return chunk, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+// takes 1-based position ith of the byte in the data
+func ithBytePosition(data *[]byte, ith int, tar byte) int {
+	for i, b := range *data {
+		if b == tar {
+			ith--
+			if ith == 0 {
+				return i
+			}
+		}
 	}
+	return -1
 }
 
 func trimmedBuff(buff []byte, readLimit, currLinesRead int) ([]byte, int) {
