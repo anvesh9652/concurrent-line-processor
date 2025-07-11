@@ -1,6 +1,8 @@
 package codes
 
-import "sync"
+import (
+	"sync"
+)
 
 var (
 	workers   = 8

@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	clp "github.com/anvesh9652/concurrent-line-processor"
 )
@@ -56,16 +57,26 @@ func GetAllKeys(r io.Reader, rowsLimit int) ([]string, error) {
 
 // These functions can be reusalbe outside of this package
 func ConvertJsonlToCsv(columns []string, r io.Reader, w io.Writer) error {
+	buffPool := sync.Pool{
+		New: func() any {
+			return bytes.NewBuffer(make([]byte, 1024*3))
+		},
+	}
 	customProcessor := func(b []byte) ([]byte, error) {
 		var d map[string]any
 		if err := json.Unmarshal(b, &d); err != nil {
-			return nil, err
+			return nil, nil
 		}
-		var row []string
-		for _, col := range columns {
-			row = append(row, ConvertAnyToString(d[col]))
+
+		row := make([]string, len(columns))
+		for i, col := range columns {
+			row[i] = ConvertAnyToString(d[col])
 		}
-		buff := bytes.NewBuffer(nil)
+
+		buff := buffPool.Get().(*bytes.Buffer)
+		buff.Reset()
+		defer buffPool.Put(buff)
+
 		cw := csv.NewWriter(buff)
 		if err := cw.Write(row); err != nil {
 			return nil, err
