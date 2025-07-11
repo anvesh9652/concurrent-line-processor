@@ -239,7 +239,7 @@ func (p *ConcurrentLineProcessor) processChunks(ctx context.Context) error {
 				if err != nil || chunk == nil {
 					return err
 				}
-				if err := p.processChunk(ctxEg, chunk); err != nil {
+				if err := p.processSingleChunk(ctxEg, chunk); err != nil {
 					p.putBuffToPool(chunk.data)
 					return err
 				}
@@ -250,7 +250,7 @@ func (p *ConcurrentLineProcessor) processChunks(ctx context.Context) error {
 	return poolErrG.Wait()
 }
 
-func (p *ConcurrentLineProcessor) processChunk(ctx context.Context, chunk *Chunk) error {
+func (p *ConcurrentLineProcessor) processSingleChunk(ctx context.Context, chunk *Chunk) error {
 	var (
 		lineStart = 0
 
@@ -336,17 +336,21 @@ func trimmedBuff(buff []byte, readLimit, currLinesRead int) ([]byte, int) {
 		return buff[:0], 0
 	}
 
-	linesFound := 0
-	for i, b := range buff {
-		if b == '\n' {
-			linesFound++
-			if linesFound >= linesNeeded {
-				// We've found the exact number of lines needed to reach the limit.
-				return buff[:i+1], linesFound
-			}
+	searchArea := buff
+	var linesFound, buffLen, ind int
+	for {
+		ind = bytes.IndexByte(searchArea, '\n')
+		if ind == -1 {
+			break
 		}
+		linesFound++
+		buffLen += ind + 1
+		if linesFound >= linesNeeded {
+			// the buff includes new line at the end
+			return buff[:buffLen], linesFound
+		}
+		searchArea = searchArea[ind+1:]
 	}
-
 	// If not enough newlines were found, the whole buffer is used.
 	return buff, linesFound
 }

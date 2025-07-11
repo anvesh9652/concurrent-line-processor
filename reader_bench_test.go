@@ -43,10 +43,10 @@ goos: darwin
 goarch: arm64
 pkg: github.com/anvesh9652/concurrent-line-processor
 cpu: Apple M1 Pro
-BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv-10         	    7124	    159049 ns/op	  195839 B/op	      60 allocs/op
-BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-details.jsonl-10  	     289	   4285459 ns/op	 3755469 B/op	    1296 allocs/op
+BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv-10         	    7088	    166716 ns/op	  323478 B/op	      61 allocs/op
+BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-details.jsonl-10  	     445	   3055034 ns/op	 1981411 B/op	     595 allocs/op
 PASS
-ok  	github.com/anvesh9652/concurrent-line-processor	2.940s
+ok  	github.com/anvesh9652/concurrent-line-processor	2.713s
 */
 
 func BenchmarkParallelReader(b *testing.B) {
