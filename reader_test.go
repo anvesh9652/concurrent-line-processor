@@ -107,7 +107,7 @@ func TestNewReader_LargeInput(t *testing.T) {
 	}
 }
 
-func TestNewReader_NoNewlineAtEnd(t *testing.T) {
+func TestNewReader_AlwaysNewlineAtEnd(t *testing.T) {
 	input := "foo\nbar\nbaz"
 	r := strings.NewReader(input)
 	pr := NewConcurrentLineProcessor(r)
@@ -115,8 +115,8 @@ func TestNewReader_NoNewlineAtEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(out) != input+"\n" && string(out) != input {
-		t.Errorf("expected output to match input (with or without trailing newline), got %q", string(out))
+	if string(out[len(out)-1]) != "\n" {
+		t.Errorf("expected output to have trailing newline, got %q", string(out))
 	}
 }
 

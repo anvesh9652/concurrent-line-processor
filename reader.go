@@ -236,11 +236,8 @@ func (p *ConcurrentLineProcessor) processChunks(ctx context.Context) error {
 		poolErrG.Go(func() error {
 			for {
 				chunk, err := getFromStream(ctxEg, p.inStream)
-				if err != nil {
+				if err != nil || chunk == nil {
 					return err
-				}
-				if chunk == nil {
-					return nil
 				}
 				if err := p.processChunk(ctxEg, chunk); err != nil {
 					p.putBuffToPool(chunk.data)
@@ -261,33 +258,34 @@ func (p *ConcurrentLineProcessor) processChunk(ctx context.Context, chunk *Chunk
 		data = *chunk.data
 	)
 
-	for i, r := range data {
-		if i == len(data)-1 {
-			i++
+	var ind, lineEnd int
+	for lineStart < len(data) {
+		ind = bytes.IndexByte(data[lineStart:], '\n')
+		lineEnd = lineStart + ind // the ind is relative to buff passed to IndexByte
+		if ind == -1 {
+			lineEnd = len(data)
 		}
-		if r == '\n' || i == len(data) {
-			pb, err := p.customLineProcessor(data[lineStart:i])
-			if err != nil {
-				p.putBuffToPool(buff) // safety call to avoid memory leak
-				return err
-			}
-			// Learning: writing each line to the output stream one by one drastically worse the performance
-			// due to the number of system calls. It is better to write the whole chunk at once to the output stream
-			*buff = append(*buff, WithNewLine(pb)...)
-			lineStart = i + 1
+
+		pb, err := p.customLineProcessor(data[lineStart:lineEnd])
+		if err != nil {
+			p.putBuffToPool(buff) // safety call to avoid memory leaks
+			return err
 		}
+		// Learning: writing each line to the output stream one by one drastically worse the performance
+		// due to the number of system calls. It is better to write the whole chunk at once to the output stream
+		*buff = append(*buff, pb...)
+		AppendNewLine(buff)
+		lineStart = lineEnd + 1
 	}
+
 	return sendToStream(ctx, p.outStream, &Chunk{id: chunk.id, data: buff})
 }
 
 func (p *ConcurrentLineProcessor) readProcessedData(ctx context.Context) error {
 	for {
 		chunk, err := getFromStream(ctx, p.outStream)
-		if err != nil {
+		if err != nil || chunk == nil {
 			return err
-		}
-		if chunk == nil {
-			break
 		}
 
 		buff := chunk.data
@@ -302,7 +300,6 @@ func (p *ConcurrentLineProcessor) readProcessedData(ctx context.Context) error {
 		atomic.AddInt64(&p.metrics.TransformedBytes, int64(n))
 		p.putBuffToPool(buff)
 	}
-	return nil
 }
 
 func (p *ConcurrentLineProcessor) putBuffToPool(buff *[]byte) {
@@ -329,28 +326,27 @@ func sendToStream(ctx context.Context, s chan *Chunk, c *Chunk) error {
 	return nil
 }
 
-// takes 1-based position ith of the byte in the data
-func ithBytePosition(data *[]byte, ith int, tar byte) int {
-	for i, b := range *data {
-		if b == tar {
-			ith--
-			if ith == 0 {
-				return i
+func trimmedBuff(buff []byte, readLimit, currLinesRead int) ([]byte, int) {
+	if readLimit == -1 {
+		return buff, bytes.Count(buff, []byte{'\n'})
+	}
+
+	linesNeeded := readLimit - currLinesRead
+	if linesNeeded <= 0 {
+		return buff[:0], 0
+	}
+
+	linesFound := 0
+	for i, b := range buff {
+		if b == '\n' {
+			linesFound++
+			if linesFound >= linesNeeded {
+				// We've found the exact number of lines needed to reach the limit.
+				return buff[:i+1], linesFound
 			}
 		}
 	}
-	return -1
-}
 
-func trimmedBuff(buff []byte, readLimit, currLinesRead int) ([]byte, int) {
-	lines := bytes.Count(buff, []byte{'\n'})
-	linesNeeded := lines
-	if readLimit != -1 {
-		if currLinesRead+lines >= readLimit {
-			linesNeeded = (readLimit - currLinesRead)
-			pos := ithBytePosition(&buff, linesNeeded, '\n')
-			buff = buff[:pos+1] // +1 to include the new line character
-		}
-	}
-	return buff, linesNeeded
+	// If not enough newlines were found, the whole buffer is used.
+	return buff, linesFound
 }
