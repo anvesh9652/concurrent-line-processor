@@ -31,10 +31,12 @@ type Metrics struct {
 	// BytesRead is the total number of bytes read from the source reader.
 	// When RowsReadLimit is set, it might read more bytes than the transformed bytes.
 	BytesRead int64 `json:"bytes_read"`
-	// TransformedBytes is the total number of bytes after processing each line.
-	TransformedBytes int64 `json:"transformed_bytes"`
+	// BytesTransformed is the total number of bytes after processing each line.
+	BytesTransformed int64 `json:"transformed_bytes"`
 	// RowsRead is the total number of rows read from the source reader.
 	RowsRead int64 `json:"rows_read"`
+	// RowsWritten is the total number of rows written to the output stream.
+	RowsWritten int64 `json:"rows_written"`
 	// TimeTook is the total time taken to read and process the data.
 	TimeTook string `json:"time_took"`
 }

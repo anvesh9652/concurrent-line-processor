@@ -128,8 +128,9 @@ func (p *ConcurrentLineProcessor) Read(b []byte) (int, error) {
 func (p *ConcurrentLineProcessor) Metrics() Metrics {
 	return Metrics{
 		RowsRead:         atomic.LoadInt64(&p.metrics.RowsRead),
+		RowsWritten:      atomic.LoadInt64(&p.metrics.RowsWritten),
 		BytesRead:        atomic.LoadInt64(&p.metrics.BytesRead),
-		TransformedBytes: atomic.LoadInt64(&p.metrics.TransformedBytes),
+		BytesTransformed: atomic.LoadInt64(&p.metrics.BytesTransformed),
 		TimeTook:         p.metrics.TimeTook, // It's safe to return --race flag isn't complaining
 	}
 }
@@ -147,9 +148,10 @@ func (p *ConcurrentLineProcessor) Summary() string {
 		", workers=" + strconv.Itoa(p.workers) +
 		", channelSize=" + strconv.Itoa(p.channelSize) +
 		", rowsReadLimit=" + strconv.Itoa(p.rowsReadLimit) +
-		", rowsRead=" + strconv.FormatInt(metrics.RowsRead, 10) +
-		", transformedBytes=" + FormatBytes(int(metrics.TransformedBytes)) +
 		", bytesRead=" + FormatBytes(int(metrics.BytesRead)) +
+		", bytesTransformed=" + FormatBytes(int(metrics.BytesTransformed)) +
+		", rowsRead=" + strconv.FormatInt(metrics.RowsRead, 10) +
+		", rowsWritten=" + strconv.FormatInt(metrics.RowsWritten, 10) +
 		", timeTook=" + metrics.TimeTook
 }
 
@@ -297,7 +299,8 @@ func (p *ConcurrentLineProcessor) readProcessedData(ctx context.Context) error {
 			return err
 		}
 
-		atomic.AddInt64(&p.metrics.TransformedBytes, int64(n))
+		atomic.AddInt64(&p.metrics.BytesTransformed, int64(n))
+		atomic.AddInt64(&p.metrics.RowsWritten, int64(bytes.Count(*buff, []byte{'\n'})))
 		p.putBuffToPool(buff)
 	}
 }
