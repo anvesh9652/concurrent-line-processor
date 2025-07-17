@@ -10,7 +10,7 @@ A high-performance, concurrent line-by-line processor for large files and stream
 - **Concurrent Processing**: Process lines concurrently using configurable number of worker goroutines
 - **Memory Efficient**: Uses memory pooling and streaming to handle large files without loading everything into memory
 - **Customizable**: Support for custom line processing functions
-- **Metrics**: Built-in performance metrics (bytes read, rows processed, processing time)
+- **Metrics**: Built-in performance metrics (bytes read, rows processed, processing time etc..)
 - **Standard Interface**: Implements `io.Reader` for seamless integration with existing Go I/O patterns
 - **Flexible Configuration**: Configurable chunk size, worker count, and row limits
 
@@ -268,15 +268,16 @@ The processor provides detailed metrics accessible via the `Metrics()` method:
 ```go
 type Metrics struct {
     BytesRead        int64  `json:"bytes_read"`        // Total bytes read from source
-    TransformedBytes int64  `json:"transformed_bytes"` // Total bytes after processing
+    BytesTransformed int64  `json:"bytes_transformed"` // Total bytes after processing each line
     RowsRead         int64  `json:"rows_read"`         // Total rows processed
+    RowsWritten      int64  `json:"rows_written"`      // Total rows written to the output stream
     TimeTook         string `json:"time_took"`         // Total processing time
 }
 ```
 
 ## Thread Safety
 
-- The `ConcurrentLineProcessor` itself is safe for concurrent use
+- The `concurrentLineProcessor` itself is safe for concurrent use
 - Custom line processor functions must be thread-safe
 - Metrics can be safely accessed concurrently
 - The processor implements `io.Reader` and can be used safely by one goroutine at a time

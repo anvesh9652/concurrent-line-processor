@@ -3,9 +3,9 @@
 // See reader.go for full package documentation and usage examples.
 package concurrentlineprocessor
 
-// WithOpts applies the given options to the ConcurrentLineProcessor.
+// WithOpts applies the given options to the concurrentLineProcessor.
 // This is a convenience function for applying multiple options at once.
-func WithOpts(p *ConcurrentLineProcessor, opts ...Option) {
+func WithOpts(p *concurrentLineProcessor, opts ...Option) {
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -19,7 +19,7 @@ func WithOpts(p *ConcurrentLineProcessor, opts ...Option) {
 //
 //	clp.NewConcurrentLineProcessor(reader, clp.WithChunkSize(1024*1024)) // 1MB chunks
 func WithChunkSize(size int) Option {
-	return func(pr *ConcurrentLineProcessor) {
+	return func(pr *concurrentLineProcessor) {
 		pr.chunkSize = size
 	}
 }
@@ -32,7 +32,7 @@ func WithChunkSize(size int) Option {
 //
 //	clp.NewConcurrentLineProcessor(reader, clp.WithWorkers(8))
 func WithWorkers(n int) Option {
-	return func(pr *ConcurrentLineProcessor) {
+	return func(pr *concurrentLineProcessor) {
 		pr.workers = n
 	}
 }
@@ -50,7 +50,7 @@ func WithWorkers(n int) Option {
 //	}
 //	clp.NewConcurrentLineProcessor(reader, clp.WithCustomLineProcessor(processor))
 func WithCustomLineProcessor(c LineProcessor) Option {
-	return func(pr *ConcurrentLineProcessor) {
+	return func(pr *concurrentLineProcessor) {
 		pr.customLineProcessor = c
 	}
 }
@@ -63,7 +63,7 @@ func WithCustomLineProcessor(c LineProcessor) Option {
 //
 //	clp.NewConcurrentLineProcessor(reader, clp.WithRowsReadLimit(1000)) // Process only first 1000 lines
 func WithRowsReadLimit(limit int) Option {
-	return func(pr *ConcurrentLineProcessor) {
+	return func(pr *concurrentLineProcessor) {
 		pr.rowsReadLimit = limit
 	}
 }
@@ -76,7 +76,7 @@ func WithRowsReadLimit(limit int) Option {
 //
 //	clp.NewConcurrentLineProcessor(reader, clp.WithChannelSize(1000)) // 1000 items in channel
 func WithChannelSize(size int) Option {
-	return func(pr *ConcurrentLineProcessor) {
+	return func(pr *concurrentLineProcessor) {
 		pr.channelSize = size
 	}
 }

@@ -63,7 +63,7 @@ var (
 	defaultChanSize = 70
 )
 
-// NewConcurrentLineProcessor creates a new ConcurrentLineProcessor that reads from the provided io.Reader.
+// NewConcurrentLineProcessor creates a new concurrentLineProcessor that reads from the provided io.Reader.
 // It starts processing immediately in background goroutines and returns a processor that implements io.Reader.
 //
 // The processor splits input into chunks, processes each line concurrently using multiple workers,
@@ -86,9 +86,9 @@ var (
 //	if err != nil {
 //		log.Fatal(err)
 //	}
-func NewConcurrentLineProcessor(r io.Reader, opts ...Option) *ConcurrentLineProcessor {
+func NewConcurrentLineProcessor(r io.Reader, opts ...Option) *concurrentLineProcessor {
 	pr, pw := io.Pipe()
-	p := &ConcurrentLineProcessor{
+	p := &concurrentLineProcessor{
 		srcReader: r,
 
 		workers:       defaultWorkers,
@@ -119,13 +119,13 @@ func NewConcurrentLineProcessor(r io.Reader, opts ...Option) *ConcurrentLineProc
 
 // Read implements io.Reader interface, allowing the processed data to be read
 // using standard Go I/O patterns like io.Copy, io.ReadAll, bufio.Scanner, etc.
-func (p *ConcurrentLineProcessor) Read(b []byte) (int, error) {
+func (p *concurrentLineProcessor) Read(b []byte) (int, error) {
 	return p.pr.Read(b)
 }
 
 // Metrics returns the current processing metrics including bytes read, rows processed,
 // and total processing time. The metrics are safe to access concurrently.
-func (p *ConcurrentLineProcessor) Metrics() Metrics {
+func (p *concurrentLineProcessor) Metrics() Metrics {
 	return Metrics{
 		RowsRead:         atomic.LoadInt64(&p.metrics.RowsRead),
 		RowsWritten:      atomic.LoadInt64(&p.metrics.RowsWritten),
@@ -136,13 +136,13 @@ func (p *ConcurrentLineProcessor) Metrics() Metrics {
 }
 
 // RowsRead returns the current number of rows that have been read from the source.
-func (p *ConcurrentLineProcessor) RowsRead() int {
+func (p *concurrentLineProcessor) RowsRead() int {
 	return int(atomic.LoadInt64(&p.metrics.RowsRead))
 }
 
 // Summary returns a string summarizing the settings and metrics of the processor.
 // Note: time took is only updated after the processing is complete.
-func (p *ConcurrentLineProcessor) Summary() string {
+func (p *concurrentLineProcessor) Summary() string {
 	metrics := p.Metrics()
 	return "chunkSize=" + FormatBytes(p.chunkSize) +
 		", workers=" + strconv.Itoa(p.workers) +
@@ -155,7 +155,7 @@ func (p *ConcurrentLineProcessor) Summary() string {
 		", timeTook=" + metrics.TimeTook
 }
 
-func (p *ConcurrentLineProcessor) start() {
+func (p *concurrentLineProcessor) start() {
 	now := time.Now()
 	eg, ctx := errgroup.WithContext(context.Background())
 	eg.Go(func() error { return p.readAsChunks(ctx) })
@@ -176,7 +176,7 @@ func (p *ConcurrentLineProcessor) start() {
 	p.pw.CloseWithError(err)
 }
 
-func (p *ConcurrentLineProcessor) readAsChunks(ctx context.Context) error {
+func (p *concurrentLineProcessor) readAsChunks(ctx context.Context) error {
 	var (
 		leftOver = p.pool.Get().(*[]byte)
 		buff     = make([]byte, p.chunkSize)
@@ -231,7 +231,7 @@ func (p *ConcurrentLineProcessor) readAsChunks(ctx context.Context) error {
 	return nil
 }
 
-func (p *ConcurrentLineProcessor) processChunks(ctx context.Context) error {
+func (p *concurrentLineProcessor) processChunks(ctx context.Context) error {
 	defer close(p.outStream)
 	poolErrG, ctxEg := errgroup.WithContext(ctx)
 	for range p.workers {
@@ -252,7 +252,7 @@ func (p *ConcurrentLineProcessor) processChunks(ctx context.Context) error {
 	return poolErrG.Wait()
 }
 
-func (p *ConcurrentLineProcessor) processSingleChunk(ctx context.Context, chunk *Chunk) error {
+func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk *Chunk) error {
 	var (
 		lineStart = 0
 
@@ -283,7 +283,7 @@ func (p *ConcurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 	return sendToStream(ctx, p.outStream, &Chunk{id: chunk.id, data: buff})
 }
 
-func (p *ConcurrentLineProcessor) readProcessedData(ctx context.Context) error {
+func (p *concurrentLineProcessor) readProcessedData(ctx context.Context) error {
 	for {
 		chunk, err := getFromStream(ctx, p.outStream)
 		if err != nil || chunk == nil {
@@ -305,7 +305,7 @@ func (p *ConcurrentLineProcessor) readProcessedData(ctx context.Context) error {
 	}
 }
 
-func (p *ConcurrentLineProcessor) putBuffToPool(buff *[]byte) {
+func (p *concurrentLineProcessor) putBuffToPool(buff *[]byte) {
 	// Reset the buffer to avoid any data curruption
 	*buff = (*buff)[:0]
 	p.pool.Put(buff)

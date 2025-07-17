@@ -9,9 +9,9 @@ import (
 )
 
 type (
-	// Option is a function type for configuring ConcurrentLineProcessor instances.
+	// Option is a function type for configuring concurrentLineProcessor instances.
 	// Options are passed to NewConcurrentLineProcessor to customize behavior.
-	Option func(*ConcurrentLineProcessor)
+	Option func(*concurrentLineProcessor)
 
 	// LineProcessor is a function type for processing individual lines.
 	// It receives a line as []byte and returns the processed line and any error.
@@ -26,13 +26,13 @@ type Chunk struct {
 	data *[]byte
 }
 
-// Metrics contains performance and processing statistics for a ConcurrentLineProcessor.
+// Metrics contains performance and processing statistics for a concurrentLineProcessor.
 type Metrics struct {
 	// BytesRead is the total number of bytes read from the source reader.
 	// When RowsReadLimit is set, it might read more bytes than the transformed bytes.
 	BytesRead int64 `json:"bytes_read"`
 	// BytesTransformed is the total number of bytes after processing each line.
-	BytesTransformed int64 `json:"transformed_bytes"`
+	BytesTransformed int64 `json:"bytes_transformed"`
 	// RowsRead is the total number of rows read from the source reader.
 	RowsRead int64 `json:"rows_read"`
 	// RowsWritten is the total number of rows written to the output stream.
@@ -41,10 +41,10 @@ type Metrics struct {
 	TimeTook string `json:"time_took"`
 }
 
-// ConcurrentLineProcessor provides high-performance, concurrent line-by-line processing
+// concurrentLineProcessor provides high-performance, concurrent line-by-line processing
 // of large files or streams. It implements io.Reader, allowing processed data to be
 // read using standard Go I/O patterns.
-type ConcurrentLineProcessor struct {
+type concurrentLineProcessor struct {
 	// srcReader is the source reader from which data will be read.
 	srcReader io.Reader
 

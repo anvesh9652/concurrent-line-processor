@@ -75,7 +75,7 @@ func TestParallelReader(t *testing.T) {
 	})
 }
 
-func NewTestParallelReader(r io.Reader) *ConcurrentLineProcessor {
+func NewTestParallelReader(r io.Reader) *concurrentLineProcessor {
 	custOp := func(b []byte) ([]byte, error) {
 		return b, nil
 	}
