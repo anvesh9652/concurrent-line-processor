@@ -160,18 +160,14 @@ func (p *concurrentLineProcessor) start() {
 	eg, ctx := errgroup.WithContext(context.Background())
 	eg.Go(func() error { return p.readAsChunks(ctx) })
 	eg.Go(func() error { return p.processChunks(ctx) })
-	eg.Go(func() error { return p.readProcessedData(ctx) })
+	eg.Go(func() error { return p.writeProcessedData(ctx) })
 
-	// go func() {
-	// 	t := time.NewTicker(5 * time.Second)
-	// 	for range t.C {
-	// 		fmt.Println("rows read:", p.RowsRead(), "time took so far:", time.Since(now))
-	// 	}
-	// }()
+	// go PrintSummaryPeriodically(p, now)
 
 	// Learning: if a goroutine returns an error, and the other goroutines are still running.
 	// we will not get any error on eg.Wait() if we don't use errgroup with context.
 	err := eg.Wait()
+	p.drainChannelData()
 	p.metrics.TimeTook = time.Since(now).String()
 	p.pw.CloseWithError(err)
 }
@@ -242,10 +238,8 @@ func (p *concurrentLineProcessor) processChunks(ctx context.Context) error {
 					return err
 				}
 				if err := p.processSingleChunk(ctxEg, chunk); err != nil {
-					p.putBuffToPool(chunk.data)
 					return err
 				}
-				p.putBuffToPool(chunk.data)
 			}
 		})
 	}
@@ -259,6 +253,14 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 		buff = p.pool.Get().(*[]byte)
 		data = *chunk.data
 	)
+	// put the original chunk data back to the pool
+	defer p.putBuffToPool(chunk.data)
+
+	if !p.hasCustomLineProcessor {
+		*buff = append(*buff, data...)
+		AppendNewLine(buff)
+		return sendToStream(ctx, p.outStream, &Chunk{id: chunk.id, data: buff})
+	}
 
 	var ind, lineEnd int
 	for lineStart < len(data) {
@@ -270,7 +272,7 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 
 		pb, err := p.customLineProcessor(data[lineStart:lineEnd])
 		if err != nil {
-			p.putBuffToPool(buff) // safety call to avoid memory leaks
+			p.putBuffToPool(buff)
 			return err
 		}
 		// Learning: writing each line to the output stream one by one drastically worse the performance
@@ -283,29 +285,45 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 	return sendToStream(ctx, p.outStream, &Chunk{id: chunk.id, data: buff})
 }
 
-func (p *concurrentLineProcessor) readProcessedData(ctx context.Context) error {
+func (p *concurrentLineProcessor) writeProcessedData(ctx context.Context) error {
 	for {
 		chunk, err := getFromStream(ctx, p.outStream)
 		if err != nil || chunk == nil {
 			return err
 		}
 
-		buff := chunk.data
-		n, err := p.pw.Write(*buff)
-		if err != nil {
-			// Learning: we can do this in defer also, but it allocates a small amount of memory,
-			// resutling lots of memory allocations for bigger files
-			p.putBuffToPool(buff)
+		// Inline function to safely put bufferes back into the pool after writing
+		write := func(buff *[]byte) error {
+			defer p.putBuffToPool(buff)
+			n, err := p.pw.Write(*buff)
+			if err != nil {
+				return err
+			}
+
+			atomic.AddInt64(&p.metrics.BytesTransformed, int64(n))
+			atomic.AddInt64(&p.metrics.RowsWritten, int64(bytes.Count(*buff, []byte{'\n'})))
+			return nil
+		}
+		if err := write(chunk.data); err != nil {
 			return err
 		}
+	}
+}
 
-		atomic.AddInt64(&p.metrics.BytesTransformed, int64(n))
-		atomic.AddInt64(&p.metrics.RowsWritten, int64(bytes.Count(*buff, []byte{'\n'})))
-		p.putBuffToPool(buff)
+// drainChannelData drains the input and output channels to ensure no data is leaking after any errors
+func (p *concurrentLineProcessor) drainChannelData() {
+	for chunk := range p.inStream {
+		p.putBuffToPool(chunk.data)
+	}
+	for chunk := range p.outStream {
+		p.putBuffToPool(chunk.data)
 	}
 }
 
 func (p *concurrentLineProcessor) putBuffToPool(buff *[]byte) {
+	if buff == nil {
+		return
+	}
 	// Reset the buffer to avoid any data curruption
 	*buff = (*buff)[:0]
 	p.pool.Put(buff)
@@ -330,11 +348,15 @@ func sendToStream(ctx context.Context, s chan *Chunk, c *Chunk) error {
 }
 
 func trimmedBuff(buff []byte, readLimit, currLinesRead int) ([]byte, int) {
-	if readLimit == -1 {
-		return buff, bytes.Count(buff, []byte{'\n'})
+	newLinesCnt := bytes.Count(buff, []byte{'\n'})
+	linesNeeded := newLinesCnt
+	if readLimit != -1 {
+		linesNeeded = readLimit - currLinesRead
+	}
+	if linesNeeded >= newLinesCnt {
+		return buff, newLinesCnt
 	}
 
-	linesNeeded := readLimit - currLinesRead
 	if linesNeeded <= 0 {
 		return buff[:0], 0
 	}

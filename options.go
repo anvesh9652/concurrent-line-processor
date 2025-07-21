@@ -51,6 +51,10 @@ func WithWorkers(n int) Option {
 //	clp.NewConcurrentLineProcessor(reader, clp.WithCustomLineProcessor(processor))
 func WithCustomLineProcessor(c LineProcessor) Option {
 	return func(pr *concurrentLineProcessor) {
+		if c == nil {
+			return
+		}
+		pr.hasCustomLineProcessor = true
 		pr.customLineProcessor = c
 	}
 }

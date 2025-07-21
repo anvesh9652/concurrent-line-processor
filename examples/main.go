@@ -15,7 +15,7 @@ func main() {
 }
 
 func start() {
-	r, err := os.Open(clp.Files[0])
+	r, err := os.Open(clp.Files[3])
 	clp.ExitOnError(err)
 	defer r.Close()
 

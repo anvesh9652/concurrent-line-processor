@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"time"
 )
 
 // Files contains a list of test files used for development and testing.
@@ -56,4 +57,11 @@ func FormatBytes(size int) string {
 		return fmt.Sprintf("%.2fKB", float64(size)/1024)
 	}
 	return fmt.Sprintf("%.2fMB", float64(size)/(1024*1024))
+}
+
+func PrintSummaryPeriodically(p *concurrentLineProcessor, now time.Time) {
+	t := time.NewTicker(5 * time.Second)
+	for range t.C {
+		fmt.Printf("%s, time=%s\n", p.Summary(), time.Since(now))
+	}
 }

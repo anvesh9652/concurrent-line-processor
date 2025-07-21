@@ -62,6 +62,10 @@ type concurrentLineProcessor struct {
 	// It is not thread-safe. You can't update anything outside of the function unless you use a mutex.
 	customLineProcessor LineProcessor
 
+	// hasCustomLineProcessor indicates whether a custom line processor is set.
+	// If true, the processor will use the customLineProcessor to process each line.
+	hasCustomLineProcessor bool
+
 	inStream  chan *Chunk
 	outStream chan *Chunk
 

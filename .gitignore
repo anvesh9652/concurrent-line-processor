@@ -1,1 +1,2 @@
 profiling/*.prof
+examples/codes/direct_read.go
