@@ -90,20 +90,14 @@ func WithChannelSize(size int) Option {
 }
 
 // WithMultiReaders sets multiple source readers for the concurrentLineProcessor.
-// If you have passed a reader during initialization, it will be ignored.
+// When used, the reader passed to NewConcurrentLineProcessor can be nil because this option replaces the internal reader list.
 //
 // Example:
 //
 //	readers := []io.ReadCloser{reader1, reader2, reader3}
 //	clp.NewConcurrentLineProcessor(nil, clp.WithMultiReaders(readers...))
-func WithMultiReaders(r ...io.ReadCloser) Option {
+func WithMultiReaders(readers ...io.ReadCloser) Option {
 	return func(pr *concurrentLineProcessor) {
-		var validReaders []io.ReadCloser
-		for _, reader := range r {
-			if reader != nil {
-				validReaders = append(validReaders, reader)
-			}
-		}
-		pr.readers = validReaders
+		pr.readers = Filter(readers, func(r io.ReadCloser) bool { return r != nil })
 	}
 }

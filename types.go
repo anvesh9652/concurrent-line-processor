@@ -1,6 +1,6 @@
 // Package concurrentlineprocessor provides a high-performance, concurrent line-by-line processor for large files or streams.
 //
-// See reader.go for full package documentation and usage examples.
+// See reader.go for full package documentation and usage examples, including how to wire multiple io.ReadCloser sources into a single processor.
 package concurrentlineprocessor
 
 import (

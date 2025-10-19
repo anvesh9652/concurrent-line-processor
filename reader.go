@@ -1,6 +1,7 @@
 // Package concurrentlineprocessor provides a high-performance, concurrent line-by-line processor for large files or streams.
 //
 // This package allows you to efficiently process large files or streams by splitting the input into chunks and processing each line concurrently using multiple goroutines.
+// It now supports orchestrating multiple io.ReadCloser sources as a single logical stream, allowing you to merge large datasets without custom plumbing.
 //
 // # Features
 //   - Concurrent processing of lines using a configurable number of workers (goroutines)
@@ -63,8 +64,10 @@ var (
 	defaultChanSize = 70
 )
 
-// NewConcurrentLineProcessor creates a new concurrentLineProcessor that reads from the provided io.Reader.
+// NewConcurrentLineProcessor creates a new concurrentLineProcessor that reads from the provided io.ReadCloser.
 // It starts processing immediately in background goroutines and returns a processor that implements io.Reader.
+//
+// When you need to process more than one source, pass nil as the reader and supply inputs with WithMultiReaders.
 //
 // The processor splits input into chunks, processes each line concurrently using multiple workers,
 // and provides the processed output through the Read method.
