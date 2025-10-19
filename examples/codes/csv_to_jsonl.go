@@ -12,7 +12,7 @@ import (
 	clp "github.com/anvesh9652/concurrent-line-processor"
 )
 
-func InitConvertCtoJ(r io.Reader) {
+func InitConvertCtoJ(r io.ReadCloser) {
 	tf, err := os.Create("/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/test_conv.jsonl")
 	clp.ExitOnError(err)
 	defer tf.Close()
@@ -21,8 +21,8 @@ func InitConvertCtoJ(r io.Reader) {
 }
 
 // The reader should have header column
-func ConvertCSVToJsonl(r io.Reader, w io.Writer) error {
-	cols, r := getColumns(r)
+func ConvertCSVToJsonl(r io.ReadCloser, w io.Writer) error {
+	cols, rc := getColumns(r)
 	customProcessor := func(b []byte) ([]byte, error) {
 		cr := csv.NewReader(bytes.NewBuffer(b))
 		row, err := cr.Read()
@@ -36,7 +36,7 @@ func ConvertCSVToJsonl(r io.Reader, w io.Writer) error {
 		return json.Marshal(md)
 	}
 
-	nr := clp.NewConcurrentLineProcessor(r,
+	nr := clp.NewConcurrentLineProcessor(io.NopCloser(rc),
 		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers), clp.WithRowsReadLimit(-1),
 		clp.WithCustomLineProcessor(customProcessor),
 	)

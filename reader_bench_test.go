@@ -69,13 +69,14 @@ func TestParallelReader(t *testing.T) {
 		r, err := getFileReader(files[1])
 		FailOnErrorT(t, err)
 		pr := NewTestParallelReader(r)
+		defer pr.Close()
 		err = handleReadWrites(pr)
 		fmt.Println(pr.RowsRead())
 		FailOnErrorT(t, err)
 	})
 }
 
-func NewTestParallelReader(r io.Reader) *concurrentLineProcessor {
+func NewTestParallelReader(r io.ReadCloser) *concurrentLineProcessor {
 	custOp := func(b []byte) ([]byte, error) {
 		return b, nil
 	}

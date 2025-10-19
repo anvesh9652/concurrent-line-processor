@@ -86,10 +86,10 @@ var (
 //	if err != nil {
 //		log.Fatal(err)
 //	}
-func NewConcurrentLineProcessor(r io.Reader, opts ...Option) *concurrentLineProcessor {
+func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLineProcessor {
 	pr, pw := io.Pipe()
 	p := &concurrentLineProcessor{
-		srcReader: r,
+		readers: []io.ReadCloser{r},
 
 		workers:       defaultWorkers,
 		chunkSize:     defaultChunkSize,
@@ -121,6 +121,21 @@ func NewConcurrentLineProcessor(r io.Reader, opts ...Option) *concurrentLineProc
 // using standard Go I/O patterns like io.Copy, io.ReadAll, bufio.Scanner, etc.
 func (p *concurrentLineProcessor) Read(b []byte) (int, error) {
 	return p.pr.Read(b)
+}
+
+func (p *concurrentLineProcessor) Close() error {
+	var firstErr error
+	var once sync.Once
+
+	for _, r := range p.readers {
+		err := r.Close()
+		if err != nil {
+			once.Do(func() {
+				firstErr = err
+			})
+		}
+	}
+	return firstErr
 }
 
 // Metrics returns the current processing metrics including bytes read, rows processed,
@@ -173,58 +188,69 @@ func (p *concurrentLineProcessor) start() {
 }
 
 func (p *concurrentLineProcessor) readAsChunks(ctx context.Context) error {
-	var (
-		leftOver = p.pool.Get().(*[]byte)
-		buff     = make([]byte, p.chunkSize)
-		chunkID  = 1
+	eg, ctx := errgroup.WithContext(ctx)
 
-		copyToSend *[]byte
-	)
-
-	defer p.putBuffToPool(leftOver)
 	defer close(p.inStream)
 
-	for {
-		rr := p.RowsRead()
-		if p.rowsReadLimit != -1 && rr >= p.rowsReadLimit { // If rowsReadLimit is set, check if it has been reached
-			break
-		}
-
-		copyToSend = p.pool.Get().(*[]byte)
-		read, err := p.srcReader.Read(buff)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				if len(*leftOver) != 0 {
-					*copyToSend = append(*copyToSend, *leftOver...)
-					if err := sendToStream(ctx, p.inStream, &Chunk{id: chunkID, data: copyToSend}); err != nil {
-						return err
-					}
-				}
-				break
-			}
-			return err
-		}
-
-		currBuff, linesToUpdate := trimmedBuff(buff[:read], p.rowsReadLimit, rr)
-		atomic.AddInt64(&p.metrics.RowsRead, int64(linesToUpdate))
-		atomic.AddInt64(&p.metrics.BytesRead, int64(len(currBuff)))
-
-		ind := bytes.LastIndex(currBuff, []byte{'\n'})
-		if ind == -1 {
-			*leftOver = append(*leftOver, buff[:read]...)
+	for _, r := range p.readers {
+		if r == nil {
 			continue
 		}
+		eg.Go(func() error {
+			var (
+				leftOver = p.pool.Get().(*[]byte)
+				buff     = make([]byte, p.chunkSize)
+				chunkID  = 1
 
-		*leftOver = append(*leftOver, currBuff[:ind]...)
-		*copyToSend = append(*copyToSend, *leftOver...)
-		if err := sendToStream(ctx, p.inStream, &Chunk{id: chunkID, data: copyToSend}); err != nil {
-			return err
-		}
+				copyToSend *[]byte
+			)
 
-		*leftOver = append((*leftOver)[:0], currBuff[ind+1:]...)
-		chunkID++
+			defer p.putBuffToPool(leftOver)
+
+			for {
+				rr := p.RowsRead()
+				if p.rowsReadLimit != -1 && rr >= p.rowsReadLimit { // If rowsReadLimit is set, check if it has been reached
+					break
+				}
+
+				copyToSend = p.pool.Get().(*[]byte)
+				read, err := r.Read(buff)
+				if err != nil {
+					if errors.Is(err, io.EOF) {
+						if len(*leftOver) != 0 {
+							*copyToSend = append(*copyToSend, *leftOver...)
+							if err := sendToStream(ctx, p.inStream, &Chunk{id: chunkID, data: copyToSend}); err != nil {
+								return err
+							}
+						}
+						break
+					}
+					return err
+				}
+
+				currBuff, linesToUpdate := trimmedBuff(buff[:read], p.rowsReadLimit, rr)
+				atomic.AddInt64(&p.metrics.RowsRead, int64(linesToUpdate))
+				atomic.AddInt64(&p.metrics.BytesRead, int64(len(currBuff)))
+
+				ind := bytes.LastIndex(currBuff, []byte{'\n'})
+				if ind == -1 {
+					*leftOver = append(*leftOver, buff[:read]...)
+					continue
+				}
+
+				*leftOver = append(*leftOver, currBuff[:ind]...)
+				*copyToSend = append(*copyToSend, *leftOver...)
+				if err := sendToStream(ctx, p.inStream, &Chunk{id: chunkID, data: copyToSend}); err != nil {
+					return err
+				}
+
+				*leftOver = append((*leftOver)[:0], currBuff[ind+1:]...)
+				chunkID++
+			}
+			return nil
+		})
 	}
-	return nil
+	return eg.Wait()
 }
 
 func (p *concurrentLineProcessor) processChunks(ctx context.Context) error {

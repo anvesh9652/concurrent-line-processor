@@ -33,7 +33,7 @@ func InitConvertJtoC(file string) {
 	clp.ExitOnError(ConvertJsonlToCsv(cols, f, tf))
 }
 
-func GetAllKeys(r io.Reader, rowsLimit int) ([]string, error) {
+func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 	keys := map[string]bool{}
 	customProcessor := func(b []byte) ([]byte, error) {
 		return processBytes(b, keys)
@@ -56,7 +56,7 @@ func GetAllKeys(r io.Reader, rowsLimit int) ([]string, error) {
 }
 
 // These functions can be reusalbe outside of this package
-func ConvertJsonlToCsv(columns []string, r io.Reader, w io.Writer) error {
+func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
 	buffPool := sync.Pool{
 		New: func() any {
 			return bytes.NewBuffer(make([]byte, 1024*3))

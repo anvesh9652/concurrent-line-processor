@@ -45,8 +45,8 @@ type Metrics struct {
 // of large files or streams. It implements io.Reader, allowing processed data to be
 // read using standard Go I/O patterns.
 type concurrentLineProcessor struct {
-	// srcReader is the source reader from which data will be read.
-	srcReader io.Reader
+	// readers holds multiple source readers for processing.
+	readers []io.ReadCloser
 
 	// chunkSize is the size of each chunk to be read from the source reader.
 	chunkSize int
