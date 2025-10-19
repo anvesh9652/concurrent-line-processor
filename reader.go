@@ -126,19 +126,17 @@ func (p *concurrentLineProcessor) Read(b []byte) (int, error) {
 	return p.pr.Read(b)
 }
 
-func (p *concurrentLineProcessor) Close() error {
-	var firstErr error
-	var once sync.Once
-
+func (p *concurrentLineProcessor) Close() (retErr error) {
 	for _, r := range p.readers {
 		err := r.Close()
 		if err != nil {
-			once.Do(func() {
-				firstErr = err
-			})
+			retErr = errors.Join(retErr, err)
 		}
 	}
-	return firstErr
+	if err := p.pr.Close(); err != nil {
+		retErr = errors.Join(retErr, err)
+	}
+	return
 }
 
 // Metrics returns the current processing metrics including bytes read, rows processed,
