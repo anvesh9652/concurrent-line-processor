@@ -18,12 +18,14 @@ A high-performance, concurrent line-by-line processor for large files and stream
 ## Installation
 
 ```bash
-go get github.com/anvesh9652/concurrent-line-processor
+go get github.com/anvesh9652/concurrent-line-processor@latest
 ```
 
 ## Quick Start
 
-### Basic Usage
+Below are common usage patterns. Each example is self-contained and can be copied into a file and run with `go run`.
+
+#### 1. Basic Usage
 
 ```go
 package main
@@ -32,23 +34,31 @@ import (
     "fmt"
     "io"
     "os"
-    
+
     clp "github.com/anvesh9652/concurrent-line-processor"
 )
 
 func main() {
-    // Open a large file
     file, err := os.Open("large-file.txt")
     if err != nil {
         panic(err)
     }
     defer file.Close()
 
-    // Create a concurrent line processor
     processor := clp.NewConcurrentLineProcessor(file)
-### Merging Multiple Sources
+    output, err := io.ReadAll(processor)
+    if err != nil {
+        panic(err)
+    }
 
-Process multiple files (or any `io.ReadCloser` values) as a single logical stream:
+    fmt.Println(string(output))
+
+    metrics := processor.Metrics()
+    fmt.Printf("Processed %d rows, %d bytes in %s\n", metrics.RowsRead, metrics.BytesRead, metrics.TimeTook)
+}
+```
+
+#### 2. Merging Multiple Sources
 
 ```go
 package main
@@ -75,8 +85,8 @@ func main() {
         clp.WithMultiReaders(readers...),
         clp.WithWorkers(4),
     )
-
     defer processor.Close()
+
     _, err := io.Copy(os.Stdout, processor)
     if err != nil {
         panic(err)
@@ -84,36 +94,16 @@ func main() {
 }
 ```
 
-
-    // Read all processed output
-    output, err := io.ReadAll(processor)
-    if err != nil {
-        panic(err)
-    }
-
-    fmt.Println(string(output))
-    
-    // Print processing metrics
-    metrics := processor.Metrics()
-    fmt.Printf("Processed %d rows, %d bytes in %s\n", 
-        metrics.RowsRead, metrics.BytesRead, metrics.TimeTook)
-}
-```
-
-### Custom Line Processing
-
-Transform each line using a custom processor function:
+#### 3. Custom Line Processing
 
 ```go
 package main
 
 import (
     "bytes"
-    "encoding/json"
     "io"
     "os"
-    "strings"
-    
+
     clp "github.com/anvesh9652/concurrent-line-processor"
 )
 
@@ -124,7 +114,6 @@ func main() {
     }
     defer file.Close()
 
-    // Convert CSV lines to uppercase
     upperCaseProcessor := func(line []byte) ([]byte, error) {
         return bytes.ToUpper(line), nil
     }
@@ -140,7 +129,6 @@ func main() {
         panic(err)
     }
 
-    // Write to output file
     err = os.WriteFile("output.csv", output, 0644)
     if err != nil {
         panic(err)
@@ -148,7 +136,7 @@ func main() {
 }
 ```
 
-### CSV to JSONL Conversion
+#### 4. CSV to JSONL Conversion
 
 ```go
 package main
@@ -159,7 +147,7 @@ import (
     "encoding/json"
     "io"
     "os"
-    
+
     clp "github.com/anvesh9652/concurrent-line-processor"
 )
 
@@ -176,29 +164,25 @@ func convertCSVToJSONL(inputFile, outputFile string, headers []string) error {
     }
     defer output.Close()
 
-    // Custom processor to convert CSV row to JSON
     csvToJSONProcessor := func(line []byte) ([]byte, error) {
         reader := csv.NewReader(bytes.NewReader(line))
         row, err := reader.Read()
         if err != nil {
             return nil, err
         }
-
-        // Create map from headers and row values
         record := make(map[string]string)
         for i, header := range headers {
             if i < len(row) {
                 record[header] = row[i]
             }
         }
-
         return json.Marshal(record)
     }
 
     processor := clp.NewConcurrentLineProcessor(input,
         clp.WithCustomLineProcessor(csvToJSONProcessor),
         clp.WithWorkers(4),
-        clp.WithRowsReadLimit(-1), // Process all rows
+        clp.WithRowsReadLimit(-1),
     )
 
     _, err = io.Copy(output, processor)
@@ -206,17 +190,16 @@ func convertCSVToJSONL(inputFile, outputFile string, headers []string) error {
 }
 ```
 
-### Processing with Row Limit
-
-Process only the first N rows of a large file:
+#### 5. Processing with Row Limit
 
 ```go
 package main
 
 import (
+    "fmt"
     "io"
     "os"
-    
+
     clp "github.com/anvesh9652/concurrent-line-processor"
 )
 
@@ -228,11 +211,10 @@ func processFirstThousandRows(filename string) error {
     defer file.Close()
 
     processor := clp.NewConcurrentLineProcessor(file,
-        clp.WithRowsReadLimit(1000), // Only process first 1000 rows
+        clp.WithRowsReadLimit(1000),
         clp.WithWorkers(2),
     )
 
-    // Process and discard output (useful for analysis)
     _, err = io.Copy(io.Discard, processor)
     if err != nil {
         return err
@@ -240,37 +222,9 @@ func processFirstThousandRows(filename string) error {
 
     metrics := processor.Metrics()
     fmt.Printf("Processed %d rows in %s\n", metrics.RowsRead, metrics.TimeTook)
-    
     return nil
 }
 ```
-
-## Configuration Options
-
-The processor can be configured using the following options:
-
-### `WithWorkers(n int)`
-Sets the number of worker goroutines for concurrent processing.
-- Default: `runtime.NumCPU()`
-- Use `1` for sequential processing
-- Higher values may improve performance for CPU-intensive operations
-
-### `WithChunkSize(size int)`
-Sets the size of chunks read from the source.
-- Default: 30KB (`1024 * 30`)
-- Larger chunks may improve performance but use more memory
-- Smaller chunks may reduce memory usage but increase overhead
-
-### `WithCustomLineProcessor(processor LineProcessor)`
-Sets a custom function to process each line.
-- Function signature: `func([]byte) ([]byte, error)`
-- Must be thread-safe
-- Should not modify external state without proper synchronization
-
-### `WithRowsReadLimit(limit int)`
-Sets a limit on the number of rows to read.
-- Default: `-1` (no limit)
-- Useful for processing subsets of large files
 - Processing stops when the limit is reached
 
 ## Performance Considerations
