@@ -77,8 +77,8 @@ func WithRowsReadLimit(limit int) Option {
 }
 
 // WithChannelSize sets the size of the channels used for input and output streams.
-// A larger channel size can improve throughput for high-volume data processing,
-// The default channel size is 100.
+// A larger channel size can improve throughput for high-volume data processing.
+// Default (when unspecified) is 70 (see defaultChanSize in reader.go).
 //
 // Example:
 //
