@@ -3,6 +3,10 @@
 // See reader.go for full package documentation and usage examples.
 package concurrentlineprocessor
 
+import (
+	"io"
+)
+
 // WithOpts applies the given options to the concurrentLineProcessor.
 // This is a convenience function for applying multiple options at once.
 func WithOpts(p *concurrentLineProcessor, opts ...Option) {
@@ -82,5 +86,18 @@ func WithRowsReadLimit(limit int) Option {
 func WithChannelSize(size int) Option {
 	return func(pr *concurrentLineProcessor) {
 		pr.channelSize = size
+	}
+}
+
+// WithMultiReaders sets multiple source readers for the concurrentLineProcessor.
+// When used, the reader passed to NewConcurrentLineProcessor can be nil because this option replaces the internal reader list.
+//
+// Example:
+//
+//	readers := []io.ReadCloser{reader1, reader2, reader3}
+//	clp.NewConcurrentLineProcessor(nil, clp.WithMultiReaders(readers...))
+func WithMultiReaders(readers ...io.ReadCloser) Option {
+	return func(pr *concurrentLineProcessor) {
+		pr.readers = Filter(readers, func(r io.ReadCloser) bool { return r != nil })
 	}
 }

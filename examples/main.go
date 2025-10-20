@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	clp "github.com/anvesh9652/concurrent-line-processor"
@@ -15,14 +14,15 @@ func main() {
 }
 
 func start() {
-	r, err := os.Open(clp.Files[3])
-	clp.ExitOnError(err)
-	defer r.Close()
+	// r, err := os.Open(clp.Files[3])
+	// clp.ExitOnError(err)
+	// defer r.Close()
 
 	withTiming(func() {
 		// GetAllKeys(r, -1)
 		// InitConvertCtoJ(r)
-		InitConvertJtoC(clp.Files[2])
+		// InitConvertJtoC(clp.Files[1])
+		MultiReaders(clp.Files)
 	})
 }
 

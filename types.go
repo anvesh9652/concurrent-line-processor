@@ -1,6 +1,6 @@
 // Package concurrentlineprocessor provides a high-performance, concurrent line-by-line processor for large files or streams.
 //
-// See reader.go for full package documentation and usage examples.
+// See reader.go for full package documentation and usage examples, including how to wire multiple io.ReadCloser sources into a single processor.
 package concurrentlineprocessor
 
 import (
@@ -45,8 +45,8 @@ type Metrics struct {
 // of large files or streams. It implements io.Reader, allowing processed data to be
 // read using standard Go I/O patterns.
 type concurrentLineProcessor struct {
-	// srcReader is the source reader from which data will be read.
-	srcReader io.Reader
+	// readers holds multiple source readers for processing.
+	readers []io.ReadCloser
 
 	// chunkSize is the size of each chunk to be read from the source reader.
 	chunkSize int

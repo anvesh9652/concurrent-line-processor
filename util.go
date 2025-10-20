@@ -1,6 +1,6 @@
 // Package concurrentlineprocessor provides a high-performance, concurrent line-by-line processor for large files or streams.
 //
-// See reader.go for full package documentation and usage examples.
+// See reader.go for full package documentation and usage examples, including configuration with multiple readers.
 package concurrentlineprocessor
 
 import (
@@ -64,4 +64,14 @@ func PrintSummaryPeriodically(p *concurrentLineProcessor, now time.Time) {
 	for range t.C {
 		fmt.Printf("%s, time=%s\n", p.Summary(), time.Since(now))
 	}
+}
+
+func Filter[T any](arr []T, keep func(T) bool) []T {
+	var result []T
+	for _, item := range arr {
+		if keep(item) {
+			result = append(result, item)
+		}
+	}
+	return result
 }
