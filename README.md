@@ -3,7 +3,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/anvesh9652/concurrent-line-processor.svg)](https://pkg.go.dev/github.com/anvesh9652/concurrent-line-processor)
 [![Go Report Card](https://goreportcard.com/badge/github.com/anvesh9652/concurrent-line-processor)](https://goreportcard.com/report/github.com/anvesh9652/concurrent-line-processor)
 
-A high-performance, concurrent line-by-line processor for large files and streams in Go. This package enables efficient processing of large files by splitting input into chunks and processing each line concurrently using multiple goroutines.
+A high-performance, concurrent line-by-line processor for large files and streams in Go. This package enables efficient processing of large files by splitting input into chunks and processing each line concurrently using multiple goroutines. You can also stitch multiple data sources together and treat them as a single stream.
 
 ## Features
 
@@ -11,8 +11,9 @@ A high-performance, concurrent line-by-line processor for large files and stream
 - **Memory Efficient**: Uses memory pooling and streaming to handle large files without loading everything into memory
 - **Customizable**: Support for custom line processing functions
 - **Metrics**: Built-in performance metrics (bytes read, rows processed, processing time etc..)
-- **Standard Interface**: Implements `io.Reader` for seamless integration with existing Go I/O patterns
+- **Standard Interface**: Implements `io.ReadCloser` for seamless integration with existing Go I/O patterns
 - **Flexible Configuration**: Configurable chunk size, worker count, and row limits
+- **Multi-source Input**: Combine multiple `io.ReadCloser` inputs into a single logical stream without manual fan-in code
 
 ## Installation
 
@@ -45,6 +46,44 @@ func main() {
 
     // Create a concurrent line processor
     processor := clp.NewConcurrentLineProcessor(file)
+### Merging Multiple Sources
+
+Process multiple files (or any `io.ReadCloser` values) as a single logical stream:
+
+```go
+package main
+
+import (
+    "io"
+    "os"
+
+    clp "github.com/anvesh9652/concurrent-line-processor"
+)
+
+func main() {
+    files := []string{"part-1.log", "part-2.log", "part-3.log"}
+    var readers []io.ReadCloser
+    for _, name := range files {
+        f, err := os.Open(name)
+        if err != nil {
+            panic(err)
+        }
+        readers = append(readers, f)
+    }
+
+    processor := clp.NewConcurrentLineProcessor(nil,
+        clp.WithMultiReaders(readers...),
+        clp.WithWorkers(4),
+    )
+
+    defer processor.Close()
+    _, err := io.Copy(os.Stdout, processor)
+    if err != nil {
+        panic(err)
+    }
+}
+```
+
 
     // Read all processed output
     output, err := io.ReadAll(processor)

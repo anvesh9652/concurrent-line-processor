@@ -1,6 +1,7 @@
 // Package concurrentlineprocessor provides a high-performance, concurrent line-by-line processor for large files or streams.
 //
 // This package allows you to efficiently process large files or streams by splitting the input into chunks and processing each line concurrently using multiple goroutines.
+// It now supports orchestrating multiple io.ReadCloser sources as a single logical stream, allowing you to merge large datasets without custom plumbing.
 //
 // # Features
 //   - Concurrent processing of lines using a configurable number of workers (goroutines)
@@ -63,8 +64,10 @@ var (
 	defaultChanSize = 70
 )
 
-// NewConcurrentLineProcessor creates a new concurrentLineProcessor that reads from the provided io.Reader.
+// NewConcurrentLineProcessor creates a new concurrentLineProcessor that reads from the provided io.ReadCloser.
 // It starts processing immediately in background goroutines and returns a processor that implements io.Reader.
+//
+// When you need to process more than one source, pass nil as the reader and supply inputs with WithMultiReaders.
 //
 // The processor splits input into chunks, processes each line concurrently using multiple workers,
 // and provides the processed output through the Read method.
@@ -86,10 +89,10 @@ var (
 //	if err != nil {
 //		log.Fatal(err)
 //	}
-func NewConcurrentLineProcessor(r io.Reader, opts ...Option) *concurrentLineProcessor {
+func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLineProcessor {
 	pr, pw := io.Pipe()
 	p := &concurrentLineProcessor{
-		srcReader: r,
+		readers: []io.ReadCloser{r},
 
 		workers:       defaultWorkers,
 		chunkSize:     defaultChunkSize,
@@ -121,6 +124,19 @@ func NewConcurrentLineProcessor(r io.Reader, opts ...Option) *concurrentLineProc
 // using standard Go I/O patterns like io.Copy, io.ReadAll, bufio.Scanner, etc.
 func (p *concurrentLineProcessor) Read(b []byte) (int, error) {
 	return p.pr.Read(b)
+}
+
+func (p *concurrentLineProcessor) Close() (retErr error) {
+	for _, r := range p.readers {
+		err := r.Close()
+		if err != nil {
+			retErr = errors.Join(retErr, err)
+		}
+	}
+	if err := p.pr.Close(); err != nil {
+		retErr = errors.Join(retErr, err)
+	}
+	return
 }
 
 // Metrics returns the current processing metrics including bytes read, rows processed,
@@ -173,58 +189,69 @@ func (p *concurrentLineProcessor) start() {
 }
 
 func (p *concurrentLineProcessor) readAsChunks(ctx context.Context) error {
-	var (
-		leftOver = p.pool.Get().(*[]byte)
-		buff     = make([]byte, p.chunkSize)
-		chunkID  = 1
+	eg, ctx := errgroup.WithContext(ctx)
 
-		copyToSend *[]byte
-	)
-
-	defer p.putBuffToPool(leftOver)
 	defer close(p.inStream)
 
-	for {
-		rr := p.RowsRead()
-		if p.rowsReadLimit != -1 && rr >= p.rowsReadLimit { // If rowsReadLimit is set, check if it has been reached
-			break
-		}
-
-		copyToSend = p.pool.Get().(*[]byte)
-		read, err := p.srcReader.Read(buff)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				if len(*leftOver) != 0 {
-					*copyToSend = append(*copyToSend, *leftOver...)
-					if err := sendToStream(ctx, p.inStream, &Chunk{id: chunkID, data: copyToSend}); err != nil {
-						return err
-					}
-				}
-				break
-			}
-			return err
-		}
-
-		currBuff, linesToUpdate := trimmedBuff(buff[:read], p.rowsReadLimit, rr)
-		atomic.AddInt64(&p.metrics.RowsRead, int64(linesToUpdate))
-		atomic.AddInt64(&p.metrics.BytesRead, int64(len(currBuff)))
-
-		ind := bytes.LastIndex(currBuff, []byte{'\n'})
-		if ind == -1 {
-			*leftOver = append(*leftOver, buff[:read]...)
+	for _, r := range p.readers {
+		if r == nil {
 			continue
 		}
+		eg.Go(func() error {
+			var (
+				leftOver = p.pool.Get().(*[]byte)
+				buff     = make([]byte, p.chunkSize)
+				chunkID  = 1
 
-		*leftOver = append(*leftOver, currBuff[:ind]...)
-		*copyToSend = append(*copyToSend, *leftOver...)
-		if err := sendToStream(ctx, p.inStream, &Chunk{id: chunkID, data: copyToSend}); err != nil {
-			return err
-		}
+				copyToSend *[]byte
+			)
 
-		*leftOver = append((*leftOver)[:0], currBuff[ind+1:]...)
-		chunkID++
+			defer p.putBuffToPool(leftOver)
+
+			for {
+				rr := p.RowsRead()
+				if p.rowsReadLimit != -1 && rr >= p.rowsReadLimit { // If rowsReadLimit is set, check if it has been reached
+					break
+				}
+
+				copyToSend = p.pool.Get().(*[]byte)
+				read, err := r.Read(buff)
+				if err != nil {
+					if errors.Is(err, io.EOF) {
+						if len(*leftOver) != 0 {
+							*copyToSend = append(*copyToSend, *leftOver...)
+							if err := sendToStream(ctx, p.inStream, &Chunk{id: chunkID, data: copyToSend}); err != nil {
+								return err
+							}
+						}
+						break
+					}
+					return err
+				}
+
+				currBuff, linesToUpdate := trimmedBuff(buff[:read], p.rowsReadLimit, rr)
+				atomic.AddInt64(&p.metrics.RowsRead, int64(linesToUpdate))
+				atomic.AddInt64(&p.metrics.BytesRead, int64(len(currBuff)))
+
+				ind := bytes.LastIndex(currBuff, []byte{'\n'})
+				if ind == -1 {
+					*leftOver = append(*leftOver, buff[:read]...)
+					continue
+				}
+
+				*leftOver = append(*leftOver, currBuff[:ind]...)
+				*copyToSend = append(*copyToSend, *leftOver...)
+				if err := sendToStream(ctx, p.inStream, &Chunk{id: chunkID, data: copyToSend}); err != nil {
+					return err
+				}
+
+				*leftOver = append((*leftOver)[:0], currBuff[ind+1:]...)
+				chunkID++
+			}
+			return nil
+		})
 	}
-	return nil
+	return eg.Wait()
 }
 
 func (p *concurrentLineProcessor) processChunks(ctx context.Context) error {
