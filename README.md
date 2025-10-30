@@ -10,7 +10,7 @@ A high-performance, concurrent line-by-line processor for large files and stream
 - **Concurrent Processing**: Process lines concurrently with a configurable number of worker goroutines
 - **Memory Efficient**: Uses a `sync.Pool` and streaming; never loads entire file into memory
 - **Customizable**: Supply a thread-safe custom line processor function
-- **Metrics**: Built-in metrics (bytes read, bytes transformed, rows read/written, processing duration)
+- **Metrics**: Built-in metrics (bytes read/written, rows read/written, processing duration)
 - **Standard Interface**: Implements `io.Reader` and has a `Close()` for resource cleanup
 - **Flexible Configuration**: Configure chunk size, worker count, channel size, and row read limit
 - **Multi-source Input**: Merge multiple `io.ReadCloser` inputs into one stream (ordering between sources is nondeterministic)

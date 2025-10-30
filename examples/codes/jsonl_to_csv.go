@@ -35,7 +35,7 @@ func InitConvertJtoC(file string) {
 
 func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 	keys := map[string]bool{}
-	customProcessor := func(b []byte) ([]byte, error) {
+	customProcessor := func(b []byte, _ *clp.LineDetails) ([]byte, error) {
 		return processBytes(b, keys)
 	}
 
@@ -62,7 +62,7 @@ func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
 			return bytes.NewBuffer(make([]byte, 1024*3))
 		},
 	}
-	customProcessor := func(b []byte) ([]byte, error) {
+	customProcessor := func(b []byte, _ *clp.LineDetails) ([]byte, error) {
 		var d map[string]any
 		if err := json.Unmarshal(b, &d); err != nil {
 			return nil, nil

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"runtime/debug"
 	"time"
@@ -51,12 +52,15 @@ func PrintAsJsonString(v any) {
 }
 
 func FormatBytes(size int) string {
-	if size < 1024 {
+	sizef := float64(size)
+	if sizef < 1024 {
 		return fmt.Sprintf("%dB", size)
-	} else if size < 1024*1024 {
-		return fmt.Sprintf("%.2fKB", float64(size)/1024)
+	} else if sizef < math.Pow(1024, 2) {
+		return fmt.Sprintf("%.2fKB", sizef/1024)
+	} else if sizef < math.Pow(1024, 3) {
+		return fmt.Sprintf("%.2fMB", sizef/math.Pow(1024, 2))
 	}
-	return fmt.Sprintf("%.2fMB", float64(size)/(1024*1024))
+	return fmt.Sprintf("%.2fGB", sizef/math.Pow(1024, 3))
 }
 
 func PrintSummaryPeriodically(p *concurrentLineProcessor, now time.Time) {

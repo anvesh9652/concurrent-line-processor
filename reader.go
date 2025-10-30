@@ -101,7 +101,7 @@ func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLine
 
 		pr: pr, pw: pw,
 
-		customLineProcessor: func(b []byte) ([]byte, error) { return b, nil },
+		customLineProcessor: func(b []byte, _ *LineDetails) ([]byte, error) { return b, nil },
 	}
 
 	WithOpts(p, opts...)
@@ -143,11 +143,11 @@ func (p *concurrentLineProcessor) Close() (retErr error) {
 // and total processing time. The metrics are safe to access concurrently.
 func (p *concurrentLineProcessor) Metrics() Metrics {
 	return Metrics{
-		RowsRead:         atomic.LoadInt64(&p.metrics.RowsRead),
-		RowsWritten:      atomic.LoadInt64(&p.metrics.RowsWritten),
-		BytesRead:        atomic.LoadInt64(&p.metrics.BytesRead),
-		BytesTransformed: atomic.LoadInt64(&p.metrics.BytesTransformed),
-		TimeTook:         p.metrics.TimeTook, // It's safe to return --race flag isn't complaining
+		RowsRead:     atomic.LoadInt64(&p.metrics.RowsRead),
+		RowsWritten:  atomic.LoadInt64(&p.metrics.RowsWritten),
+		BytesRead:    atomic.LoadInt64(&p.metrics.BytesRead),
+		BytesWritten: atomic.LoadInt64(&p.metrics.BytesWritten),
+		TimeTook:     p.metrics.TimeTook, // It's safe to return --race flag isn't complaining
 	}
 }
 
@@ -165,7 +165,7 @@ func (p *concurrentLineProcessor) Summary() string {
 		", channelSize=" + strconv.Itoa(p.channelSize) +
 		", rowsReadLimit=" + strconv.Itoa(p.rowsReadLimit) +
 		", bytesRead=" + FormatBytes(int(metrics.BytesRead)) +
-		", bytesTransformed=" + FormatBytes(int(metrics.BytesTransformed)) +
+		", bytesWritten=" + FormatBytes(int(metrics.BytesWritten)) +
 		", rowsRead=" + strconv.FormatInt(metrics.RowsRead, 10) +
 		", rowsWritten=" + strconv.FormatInt(metrics.RowsWritten, 10) +
 		", timeTook=" + metrics.TimeTook
@@ -193,7 +193,7 @@ func (p *concurrentLineProcessor) readAsChunks(ctx context.Context) error {
 
 	defer close(p.inStream)
 
-	for _, r := range p.readers {
+	for i, r := range p.readers {
 		if r == nil {
 			continue
 		}
@@ -220,7 +220,7 @@ func (p *concurrentLineProcessor) readAsChunks(ctx context.Context) error {
 					if errors.Is(err, io.EOF) {
 						if len(*leftOver) != 0 {
 							*copyToSend = append(*copyToSend, *leftOver...)
-							if err := sendToStream(ctx, p.inStream, &Chunk{id: chunkID, data: copyToSend}); err != nil {
+							if err := sendToStream(ctx, p.inStream, NewChunk(chunkID, copyToSend, i)); err != nil {
 								return err
 							}
 						}
@@ -241,7 +241,7 @@ func (p *concurrentLineProcessor) readAsChunks(ctx context.Context) error {
 
 				*leftOver = append(*leftOver, currBuff[:ind]...)
 				*copyToSend = append(*copyToSend, *leftOver...)
-				if err := sendToStream(ctx, p.inStream, &Chunk{id: chunkID, data: copyToSend}); err != nil {
+				if err := sendToStream(ctx, p.inStream, NewChunk(chunkID, copyToSend, i)); err != nil {
 					return err
 				}
 
@@ -286,10 +286,10 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 	if !p.hasCustomLineProcessor {
 		*buff = append(*buff, data...)
 		AppendNewLine(buff)
-		return sendToStream(ctx, p.outStream, &Chunk{id: chunk.id, data: buff})
+		return sendToStream(ctx, p.outStream, NewChunk(chunk.id, buff, chunk.readerID))
 	}
 
-	var ind, lineEnd int
+	var ind, lineEnd, lineID int
 	for lineStart < len(data) {
 		ind = bytes.IndexByte(data[lineStart:], '\n')
 		lineEnd = lineStart + ind // the ind is relative to buff passed to IndexByte
@@ -297,7 +297,7 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 			lineEnd = len(data)
 		}
 
-		pb, err := p.customLineProcessor(data[lineStart:lineEnd])
+		pb, err := p.customLineProcessor(data[lineStart:lineEnd], NewLineDetails(chunk.id, lineID, chunk.readerID))
 		if err != nil {
 			p.putBuffToPool(buff)
 			return err
@@ -307,9 +307,10 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 		*buff = append(*buff, pb...)
 		AppendNewLine(buff)
 		lineStart = lineEnd + 1
+		lineID++
 	}
 
-	return sendToStream(ctx, p.outStream, &Chunk{id: chunk.id, data: buff})
+	return sendToStream(ctx, p.outStream, NewChunk(chunk.id, buff, chunk.readerID))
 }
 
 func (p *concurrentLineProcessor) writeProcessedData(ctx context.Context) error {
@@ -327,7 +328,7 @@ func (p *concurrentLineProcessor) writeProcessedData(ctx context.Context) error 
 				return err
 			}
 
-			atomic.AddInt64(&p.metrics.BytesTransformed, int64(n))
+			atomic.AddInt64(&p.metrics.BytesWritten, int64(n))
 			atomic.AddInt64(&p.metrics.RowsWritten, int64(bytes.Count(*buff, []byte{'\n'})))
 			return nil
 		}

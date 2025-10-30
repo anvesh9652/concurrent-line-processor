@@ -55,7 +55,7 @@ func BenchmarkParallelReader(b *testing.B) {
 			for b.Loop() {
 				r, err := getFileReader(f)
 				FailOnErrorB(b, err)
-				pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte) ([]byte, error) {
+				pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte, _ *LineDetails) ([]byte, error) {
 					return b, nil
 				}), WithWorkers(5))
 				FailOnErrorB(b, handleReadWrites(pr))
@@ -77,7 +77,7 @@ func TestParallelReader(t *testing.T) {
 }
 
 func NewTestParallelReader(r io.ReadCloser) *concurrentLineProcessor {
-	custOp := func(b []byte) ([]byte, error) {
+	custOp := func(b []byte, _ *LineDetails) ([]byte, error) {
 		return b, nil
 	}
 	return NewConcurrentLineProcessor(r, WithCustomLineProcessor(custOp), WithWorkers(1))

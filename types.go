@@ -16,23 +16,35 @@ type (
 	// LineProcessor is a function type for processing individual lines.
 	// It receives a line as []byte and returns the processed line and any error.
 	// Implementations must be thread-safe as they may be called concurrently.
-	LineProcessor func([]byte) ([]byte, error)
+	LineProcessor func(b []byte, info *LineDetails) ([]byte, error)
 )
 
 // Chunk represents a piece of data to be processed, containing an ID for ordering
 // and a pointer to the actual data buffer.
 type Chunk struct {
-	id   int
-	data *[]byte
+	id       int
+	data     *[]byte
+	readerID int
+}
+
+// LineDetails provides contextual information about a line being processed.
+// All the fileds follow zero-based indexing.
+type LineDetails struct {
+	// ChunkID is the ID of the chunk which we have read from the source reader.
+	ChunkID int
+	// LineID is the sequential ID of the line within the Chunk
+	LineID int
+	// ReaderID is the ID of the source reader from which this line was read.
+	ReaderID int
 }
 
 // Metrics contains performance and processing statistics for a concurrentLineProcessor.
 type Metrics struct {
 	// BytesRead is the total number of bytes read from the source reader.
-	// When RowsReadLimit is set, it might read more bytes than the transformed bytes.
+	// When RowsReadLimit is set, it might read more bytes than the bytes written.
 	BytesRead int64 `json:"bytes_read"`
-	// BytesTransformed is the total number of bytes after processing each line.
-	BytesTransformed int64 `json:"bytes_transformed"`
+	// BytesWritten is the total number of bytes written after processing each line.
+	BytesWritten int64 `json:"bytes_written"`
 	// RowsRead is the total number of rows read from the source reader.
 	RowsRead int64 `json:"rows_read"`
 	// RowsWritten is the total number of rows written to the output stream.
@@ -74,6 +86,22 @@ type concurrentLineProcessor struct {
 	pr *io.PipeReader
 	pw *io.PipeWriter
 
-	// metrics holds the metrics of the reading process, such as bytes read, transformed bytes, and rows read.
+	// metrics holds the metrics of the reading process, such as bytes read/written, rows read/written etc...
 	metrics Metrics
+}
+
+func NewChunk(id int, data *[]byte, readerID int) *Chunk {
+	return &Chunk{
+		id:       id,
+		data:     data,
+		readerID: readerID,
+	}
+}
+
+func NewLineDetails(chunkID, lineID, readerID int) *LineDetails {
+	return &LineDetails{
+		ChunkID:  chunkID,
+		LineID:   lineID,
+		ReaderID: readerID,
+	}
 }
