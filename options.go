@@ -4,6 +4,7 @@
 package concurrentlineprocessor
 
 import (
+	"context"
 	"io"
 )
 
@@ -100,5 +101,19 @@ func WithChannelSize(size int) Option {
 func WithMultiReaders(readers ...io.ReadCloser) Option {
 	return func(pr *concurrentLineProcessor) {
 		pr.readers = readers
+	}
+}
+
+// WithContext sets the context for the concurrentLineProcessor.
+// This context can be used to manage cancellation and timeouts for the processing operations.
+//
+// Example:
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+//	defer cancel()
+//	clp.NewConcurrentLineProcessor(reader, clp.WithContext(ctx))
+func WithContext(ctx context.Context) Option {
+	return func(pr *concurrentLineProcessor) {
+		pr.ctx = ctx
 	}
 }

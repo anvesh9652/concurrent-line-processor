@@ -4,6 +4,7 @@
 package concurrentlineprocessor
 
 import (
+	"context"
 	"io"
 	"sync"
 )
@@ -55,6 +56,9 @@ type Metrics struct {
 // of large files or streams. It implements io.Reader, allowing processed data to be
 // read using standard Go I/O patterns.
 type concurrentLineProcessor struct {
+	// ctx is the context for managing cancellation and timeouts.
+	ctx context.Context
+
 	// readers holds multiple source readers for processing.
 	readers []io.ReadCloser
 
@@ -79,7 +83,8 @@ type concurrentLineProcessor struct {
 	inStream  chan *Chunk
 	outStream chan *Chunk
 
-	pool sync.Pool
+	bytesPool       sync.Pool
+	lineDetailsPool sync.Pool
 
 	pr *io.PipeReader
 	pw *io.PipeWriter

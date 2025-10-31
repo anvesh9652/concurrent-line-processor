@@ -19,7 +19,7 @@ import (
 var Files = []string{
 	"/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv",
 	"/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-details.jsonl",
-	// "/Users/agali/Downloads/temp/my_data/usage_data_12m.json",
+	"/Users/agali/Downloads/temp/my_data/usage_data_12m.json",
 	// "/Users/agali/Desktop/Work/go-lang/tryouts/1brc/src_data.txt",
 }
 

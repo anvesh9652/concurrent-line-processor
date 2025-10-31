@@ -92,6 +92,7 @@ var (
 func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLineProcessor {
 	pr, pw := io.Pipe()
 	p := &concurrentLineProcessor{
+		ctx:     context.Background(),
 		readers: []io.ReadCloser{r},
 
 		workers:       defaultWorkers,
@@ -106,7 +107,8 @@ func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLine
 
 	WithOpts(p, opts...)
 
-	p.pool = sync.Pool{
+	p.lineDetailsPool = sync.Pool{New: func() any { return &LineDetails{} }}
+	p.bytesPool = sync.Pool{
 		New: func() any {
 			b := make([]byte, 0, p.chunkSize)
 			return &b
@@ -173,7 +175,7 @@ func (p *concurrentLineProcessor) Summary() string {
 
 func (p *concurrentLineProcessor) start() {
 	now := time.Now()
-	eg, ctx := errgroup.WithContext(context.Background())
+	eg, ctx := errgroup.WithContext(p.ctx)
 	eg.Go(func() error { return p.readAsChunks(ctx) })
 	eg.Go(func() error { return p.processChunks(ctx) })
 	eg.Go(func() error { return p.writeProcessedData(ctx) })
@@ -199,7 +201,7 @@ func (p *concurrentLineProcessor) readAsChunks(ctx context.Context) error {
 		}
 		eg.Go(func() error {
 			var (
-				leftOver = p.pool.Get().(*[]byte)
+				leftOver = p.bytesPool.Get().(*[]byte)
 				buff     = make([]byte, p.chunkSize)
 				chunkID  = 1
 
@@ -214,7 +216,7 @@ func (p *concurrentLineProcessor) readAsChunks(ctx context.Context) error {
 					break
 				}
 
-				copyToSend = p.pool.Get().(*[]byte)
+				copyToSend = p.bytesPool.Get().(*[]byte)
 				read, err := r.Read(buff)
 				if err != nil {
 					if errors.Is(err, io.EOF) {
@@ -274,24 +276,24 @@ func (p *concurrentLineProcessor) processChunks(ctx context.Context) error {
 }
 
 func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk *Chunk) error {
-	var (
-		lineStart = 0
-
-		buff = p.pool.Get().(*[]byte)
-		data = *chunk.data
-	)
-	// put the original chunk data back to the pool
-	defer p.putBuffToPool(chunk.data)
-
 	if !p.hasCustomLineProcessor {
-		*buff = append(*buff, data...)
-		AppendNewLine(buff)
-		return sendToStream(ctx, p.outStream, NewChunk(chunk.id, buff, chunk.readerID))
+		AppendNewLine(chunk.data)
+		return sendToStream(ctx, p.outStream, NewChunk(chunk.id, chunk.data, chunk.readerID))
 	}
 
-	lineDetails := NewLineDetails(chunk.readerID, chunk.id)
+	var (
+		buff        = p.bytesPool.Get().(*[]byte)
+		lineDetails = p.lineDetailsPool.Get().(*LineDetails)
+		data        = *chunk.data
+	)
 
-	var ind, lineEnd int
+	// put the original chunk data back to the pool
+	defer p.putBuffToPool(chunk.data)
+	defer p.lineDetailsPool.Put(lineDetails)
+
+	lineDetails.ChunkID, lineDetails.ReaderID = chunk.id, chunk.readerID
+
+	var lineStart, ind, lineEnd int
 	for lineStart < len(data) {
 		ind = bytes.IndexByte(data[lineStart:], '\n')
 		lineEnd = lineStart + ind // the ind is relative to buff passed to IndexByte
@@ -355,21 +357,21 @@ func (p *concurrentLineProcessor) putBuffToPool(buff *[]byte) {
 	}
 	// Reset the buffer to avoid any data curruption
 	*buff = (*buff)[:0]
-	p.pool.Put(buff)
+	p.bytesPool.Put(buff)
 }
 
-func getFromStream(ctx context.Context, s chan *Chunk) (*Chunk, error) {
+func getFromStream(ctx context.Context, ch chan *Chunk) (*Chunk, error) {
 	select {
-	case chunk := <-s:
+	case chunk := <-ch:
 		return chunk, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 }
 
-func sendToStream(ctx context.Context, s chan *Chunk, c *Chunk) error {
+func sendToStream(ctx context.Context, ch chan *Chunk, chunk *Chunk) error {
 	select {
-	case s <- c:
+	case ch <- chunk:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
