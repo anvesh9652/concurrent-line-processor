@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 )
 
@@ -18,8 +19,8 @@ import (
 var Files = []string{
 	"/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv",
 	"/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-details.jsonl",
-	"/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/transform-00002_1.csv.jsonl",
-	"/Users/agali/Desktop/Work/go-lang/tryouts/1brc/src_data.txt",
+	// "/Users/agali/Downloads/temp/my_data/usage_data_12m.json",
+	// "/Users/agali/Desktop/Work/go-lang/tryouts/1brc/src_data.txt",
 }
 
 func IfNull[T any](org *T, def T) T {
@@ -52,15 +53,19 @@ func PrintAsJsonString(v any) {
 }
 
 func FormatBytes(size int) string {
+	formatValue := func(v float64, unit string) string {
+		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.2f", v), "0"), ".") + unit
+	}
+
 	sizef := float64(size)
 	if sizef < 1024 {
 		return fmt.Sprintf("%dB", size)
 	} else if sizef < math.Pow(1024, 2) {
-		return fmt.Sprintf("%.2fKB", sizef/1024)
+		return formatValue(sizef/1024, "KB")
 	} else if sizef < math.Pow(1024, 3) {
-		return fmt.Sprintf("%.2fMB", sizef/math.Pow(1024, 2))
+		return formatValue(sizef/math.Pow(1024, 2), "MB")
 	}
-	return fmt.Sprintf("%.2fGB", sizef/math.Pow(1024, 3))
+	return formatValue(sizef/math.Pow(1024, 3), "GB")
 }
 
 func PrintSummaryPeriodically(p *concurrentLineProcessor, now time.Time) {

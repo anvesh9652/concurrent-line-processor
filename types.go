@@ -14,7 +14,7 @@ type (
 	Option func(*concurrentLineProcessor)
 
 	// LineProcessor is a function type for processing individual lines.
-	// It receives a line as []byte and returns the processed line and any error.
+	// It receives a line as []byte and info and then returns the processed line and any error.
 	// Implementations must be thread-safe as they may be called concurrently.
 	LineProcessor func(b []byte, info *LineDetails) ([]byte, error)
 )
@@ -28,14 +28,12 @@ type Chunk struct {
 }
 
 // LineDetails provides contextual information about a line being processed.
-// All the fileds follow zero-based indexing.
+// All the fields follow zero-based indexing.
 type LineDetails struct {
-	// ChunkID is the ID of the chunk which we have read from the source reader.
-	ChunkID int
-	// LineID is the sequential ID of the line within the Chunk
-	LineID int
 	// ReaderID is the ID of the source reader from which this line was read.
 	ReaderID int
+	// ChunkID is the ID of the chunk which we have read from the source reader.
+	ChunkID int
 }
 
 // Metrics contains performance and processing statistics for a concurrentLineProcessor.
@@ -98,10 +96,9 @@ func NewChunk(id int, data *[]byte, readerID int) *Chunk {
 	}
 }
 
-func NewLineDetails(chunkID, lineID, readerID int) *LineDetails {
+func NewLineDetails(readerID, chunkID int) *LineDetails {
 	return &LineDetails{
 		ChunkID:  chunkID,
-		LineID:   lineID,
 		ReaderID: readerID,
 	}
 }

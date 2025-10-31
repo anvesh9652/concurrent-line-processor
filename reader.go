@@ -289,7 +289,9 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 		return sendToStream(ctx, p.outStream, NewChunk(chunk.id, buff, chunk.readerID))
 	}
 
-	var ind, lineEnd, lineID int
+	lineDetails := NewLineDetails(chunk.readerID, chunk.id)
+
+	var ind, lineEnd int
 	for lineStart < len(data) {
 		ind = bytes.IndexByte(data[lineStart:], '\n')
 		lineEnd = lineStart + ind // the ind is relative to buff passed to IndexByte
@@ -297,7 +299,7 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 			lineEnd = len(data)
 		}
 
-		pb, err := p.customLineProcessor(data[lineStart:lineEnd], NewLineDetails(chunk.id, lineID, chunk.readerID))
+		pb, err := p.customLineProcessor(data[lineStart:lineEnd], lineDetails)
 		if err != nil {
 			p.putBuffToPool(buff)
 			return err
@@ -307,7 +309,6 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 		*buff = append(*buff, pb...)
 		AppendNewLine(buff)
 		lineStart = lineEnd + 1
-		lineID++
 	}
 
 	return sendToStream(ctx, p.outStream, NewChunk(chunk.id, buff, chunk.readerID))
