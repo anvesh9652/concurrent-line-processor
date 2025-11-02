@@ -12,6 +12,8 @@ import (
 func MultiReaders(files []string) {
 	var x []io.ReadCloser
 
+	files = []string{files[2]}
+
 	for _, file := range files {
 		f, err := os.Open(file)
 		if err != nil {
@@ -20,14 +22,16 @@ func MultiReaders(files []string) {
 		x = append(x, f)
 	}
 
-	pr := clp.NewConcurrentLineProcessor(nil, clp.WithMultiReaders(x...))
+	line := func(b []byte, info *clp.LineDetails) ([]byte, error) {
+		return b, nil
+	}
+
+	pr := clp.NewConcurrentLineProcessor(nil, clp.WithMultiReaders(x...), clp.WithCustomLineProcessor(line))
 	defer pr.Close()
 
-	f, err := os.Create("./tmp/multi_reader_output.jsonl")
+	_, err := io.Copy(io.Discard, pr)
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	_, _ = io.Copy(f, pr)
 	fmt.Println(pr.Summary())
 }

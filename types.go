@@ -27,10 +27,6 @@ type Chunk struct {
 	id       int
 	data     []byte
 	readerID int
-
-	// We don't want to do keep reslicing the data, use copy over append
-	// So we keep track of where the data ends. data after this point is a junk.
-	endingPos int
 }
 
 // LineDetails provides contextual information about a line being processed.

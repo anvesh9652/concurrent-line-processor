@@ -42,13 +42,8 @@ func AppendNewLine(chunk *Chunk) {
 	if chunk == nil {
 		return
 	}
-	if chunk.data[chunk.endingPos-1] != '\n' {
-		if chunk.endingPos < len(chunk.data) {
-			chunk.data[chunk.endingPos] = '\n'
-		} else {
-			chunk.data = append(chunk.data, '\n')
-		}
-		chunk.endingPos++
+	if len(chunk.data) == 0 || chunk.data[len(chunk.data)-1] != '\n' {
+		chunk.data = append(chunk.data, '\n')
 	}
 }
 
