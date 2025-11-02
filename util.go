@@ -20,6 +20,7 @@ var Files = []string{
 	"/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv",
 	"/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-details.jsonl",
 	"/Users/agali/Downloads/temp/my_data/usage_data_12m.json",
+	"/Users/agali/Desktop/Work/go-lang/tryouts/1brc/gen/measurements.txt",
 	// "/Users/agali/Desktop/Work/go-lang/tryouts/1brc/src_data.txt",
 }
 
@@ -37,9 +38,17 @@ func ExitOnError(err error) {
 	}
 }
 
-func AppendNewLine(b *[]byte) {
-	if len(*b) > 0 && (*b)[len(*b)-1] != '\n' {
-		*b = append(*b, '\n')
+func AppendNewLine(chunk *Chunk) {
+	if chunk == nil {
+		return
+	}
+	if chunk.data[chunk.endingPos-1] != '\n' {
+		if chunk.endingPos < len(chunk.data) {
+			chunk.data[chunk.endingPos] = '\n'
+		} else {
+			chunk.data = append(chunk.data, '\n')
+		}
+		chunk.endingPos++
 	}
 }
 
@@ -52,26 +61,48 @@ func PrintAsJsonString(v any) {
 	fmt.Println(string(b))
 }
 
-func FormatBytes(size int) string {
+func FormatBytes(size float64) string {
 	formatValue := func(v float64, unit string) string {
 		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.2f", v), "0"), ".") + unit
 	}
 
-	sizef := float64(size)
-	if sizef < 1024 {
-		return fmt.Sprintf("%dB", size)
-	} else if sizef < math.Pow(1024, 2) {
-		return formatValue(sizef/1024, "KB")
-	} else if sizef < math.Pow(1024, 3) {
-		return formatValue(sizef/math.Pow(1024, 2), "MB")
+	if size < 1024 {
+		return fmt.Sprintf("%.fB", size)
+	} else if size < math.Pow(1024, 2) {
+		return formatValue(size/1024, "KB")
+	} else if size < math.Pow(1024, 3) {
+		return formatValue(size/math.Pow(1024, 2), "MB")
 	}
-	return formatValue(sizef/math.Pow(1024, 3), "GB")
+	return formatValue(size/math.Pow(1024, 3), "GB")
 }
 
-func PrintSummaryPeriodically(p *concurrentLineProcessor, now time.Time) {
+func FormatDuration(d time.Duration) string {
+	if d < time.Microsecond {
+		return d.Round(time.Nanosecond).String()
+	}
+	if d < time.Millisecond {
+		return d.Round(time.Microsecond).String()
+	}
+	if d < time.Second {
+		return d.Round(time.Millisecond).String()
+	}
+	if d < time.Minute {
+		// example: 1.234556sec. BTW same kind of logic applies for above cases
+		// 1 * time.millisecond = +0.001sec rounding => btw(1.234 to 1.235) => after rounding 1.234s
+		// 10 * time.Millisecond = +0.01sec rounding => btw(1.23 to 1.24) => after rounding 1.23s
+		// 100 * time.Millisecond = +0.1sec rounding => btw(1.2 to 1.3) => after rounding 1.2s
+		return d.Round(10 * time.Millisecond).String()
+	}
+	if d < time.Hour {
+		return d.Round(time.Second).String()
+	}
+	return d.String()
+}
+
+func PrintSummaryPeriodically(p *concurrentLineProcessor) {
 	t := time.NewTicker(5 * time.Second)
 	for range t.C {
-		fmt.Printf("%s, time=%s\n", p.Summary(), time.Since(now))
+		fmt.Println(p.Summary())
 	}
 }
 

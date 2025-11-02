@@ -29,5 +29,5 @@ func start() {
 func withTiming(f func()) {
 	now := time.Now()
 	f()
-	fmt.Println("Total time took:", time.Since(now))
+	fmt.Println("Total time took:", clp.FormatDuration(time.Since(now)))
 }

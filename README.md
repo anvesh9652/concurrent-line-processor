@@ -306,6 +306,5 @@ Errors encountered during any stage (reading, processing, writing) propagate thr
 
 ## Future Improvements
 
-- Optional strict ordering mode using sequence numbers
-- Pluggable backpressure / adaptive channel sizing
-- Cancellation API (pass external context)
+
+## Need to work on

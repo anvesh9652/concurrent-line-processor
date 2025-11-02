@@ -7,6 +7,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"time"
 )
 
 type (
@@ -24,8 +25,12 @@ type (
 // and a pointer to the actual data buffer.
 type Chunk struct {
 	id       int
-	data     *[]byte
+	data     []byte
 	readerID int
+
+	// We don't want to do keep reslicing the data, use copy over append
+	// So we keep track of where the data ends. data after this point is a junk.
+	endingPos int
 }
 
 // LineDetails provides contextual information about a line being processed.
@@ -49,7 +54,7 @@ type Metrics struct {
 	// RowsWritten is the total number of rows written to the output stream.
 	RowsWritten int64 `json:"rows_written"`
 	// TimeTook is the total time taken to read and process the data.
-	TimeTook string `json:"time_took"`
+	TimeTook time.Duration `json:"time_took"`
 }
 
 // concurrentLineProcessor provides high-performance, concurrent line-by-line processing
@@ -83,27 +88,14 @@ type concurrentLineProcessor struct {
 	inStream  chan *Chunk
 	outStream chan *Chunk
 
-	bytesPool       sync.Pool
+	chunkPool       sync.Pool
 	lineDetailsPool sync.Pool
 
 	pr *io.PipeReader
 	pw *io.PipeWriter
 
+	now time.Time
+
 	// metrics holds the metrics of the reading process, such as bytes read/written, rows read/written etc...
 	metrics Metrics
-}
-
-func NewChunk(id int, data *[]byte, readerID int) *Chunk {
-	return &Chunk{
-		id:       id,
-		data:     data,
-		readerID: readerID,
-	}
-}
-
-func NewLineDetails(readerID, chunkID int) *LineDetails {
-	return &LineDetails{
-		ChunkID:  chunkID,
-		ReaderID: readerID,
-	}
 }
