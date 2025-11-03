@@ -1,6 +1,7 @@
 package codes
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -19,15 +20,18 @@ func MultiReaders(files []string) {
 		}
 		x = append(x, f)
 	}
+	lp := func(b []byte, _ *clp.LineDetails) ([]byte, error) {
+		buff := bytes.NewBuffer(b)
+		// buff.Write(append([]byte("\n"), b...))
+		return buff.Bytes(), nil
+	}
 
-	pr := clp.NewConcurrentLineProcessor(nil, clp.WithMultiReaders(x...))
+	pr := clp.NewConcurrentLineProcessor(nil, clp.WithMultiReaders(x...), clp.WithCustomLineProcessor(lp))
 	defer pr.Close()
 
-	f, err := os.Create("./tmp/multi_reader_output.jsonl")
+	_, err := io.Copy(io.Discard, pr)
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	_, _ = io.Copy(f, pr)
 	fmt.Println(pr.Summary())
 }
