@@ -395,6 +395,9 @@ func getFromStream(ctx context.Context, ch chan *Chunk) (*Chunk, error) {
 }
 
 func sendToStream(ctx context.Context, ch chan *Chunk, chunk *Chunk) error {
+	if chunk == nil || chunk.endingPos == 0 {
+		return nil
+	}
 	select {
 	case ch <- chunk:
 	case <-ctx.Done():

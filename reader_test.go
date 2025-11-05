@@ -41,6 +41,46 @@ func TestNewReader_CustomLineProcessor(t *testing.T) {
 	}
 }
 
+func TestNewReader_CustomProcessorReturnsNil(t *testing.T) {
+	const lines = 1500
+	var sb strings.Builder
+	for i := 0; i < lines; i++ {
+		sb.WriteString("row")
+		sb.WriteByte(':')
+		sb.WriteString(strconv.Itoa(i))
+		sb.WriteByte('\n')
+	}
+	r := newReadCloser(sb.String())
+
+	// Custom processor that intentionally drops every line by
+	pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte, _ *LineDetails) ([]byte, error) {
+		return nil, nil // valid case: skip output for this line
+	}))
+
+	out, err := io.ReadAll(pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("expected empty output when processor returns nil, got length=%d", len(out))
+	}
+
+	// Validate metrics: rows read should equal input line count; rows/bytes written should be zero
+	metrics := pr.Metrics()
+	if metrics.RowsRead != lines {
+		t.Errorf("expected RowsRead=%d, got %d", lines, metrics.RowsRead)
+	}
+	if metrics.RowsWritten != 0 {
+		t.Errorf("expected RowsWritten=0, got %d", metrics.RowsWritten)
+	}
+	if metrics.BytesWritten != 0 {
+		t.Errorf("expected BytesWritten=0, got %d", metrics.BytesWritten)
+	}
+	if pr.RowsRead() != lines { // secondary assertion for helper
+		t.Errorf("expected pr.RowsRead()=%d, got %d", lines, pr.RowsRead())
+	}
+}
+
 func TestNewReader_EmptyInput(t *testing.T) {
 	r := newReadCloser("")
 	pr := NewConcurrentLineProcessor(r)
@@ -260,3 +300,5 @@ func buildReaderData(prefix string, lines int) string {
 	}
 	return sb.String()
 }
+
+// todo: Unit tests for when line processor returns nil chunk but no error. must compare the write metrices and shoul be zero
