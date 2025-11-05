@@ -10,10 +10,11 @@ import (
 
 // WithOpts applies the given options to the concurrentLineProcessor.
 // This is a convenience function for applying multiple options at once.
-func WithOpts(p *concurrentLineProcessor, opts ...Option) {
+func WithOpts(p *concurrentLineProcessor, opts ...Option) *concurrentLineProcessor {
 	for _, opt := range opts {
 		opt(p)
 	}
+	return p
 }
 
 // WithChunkSize sets the chunk size for reading data from the source.

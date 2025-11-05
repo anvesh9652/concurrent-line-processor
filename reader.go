@@ -94,10 +94,10 @@ var (
 //	if err != nil {
 //		log.Fatal(err)
 //	}
-
 func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLineProcessor {
 	pr, pw := io.Pipe()
-	p := &concurrentLineProcessor{
+
+	p := WithOpts(&concurrentLineProcessor{
 		ctx:     context.Background(),
 		readers: []io.ReadCloser{r},
 
@@ -110,9 +110,7 @@ func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLine
 		now: time.Now(),
 
 		customLineProcessor: func(b []byte, _ *LineDetails) ([]byte, error) { return b, nil },
-	}
-
-	WithOpts(p, opts...)
+	}, opts...)
 
 	p.lineDetailsPool = sync.Pool{New: func() any { return &LineDetails{} }}
 	p.chunkPool = sync.Pool{
@@ -136,8 +134,7 @@ func (p *concurrentLineProcessor) Read(b []byte) (int, error) {
 
 func (p *concurrentLineProcessor) Close() (retErr error) {
 	for _, r := range p.readers {
-		err := r.Close()
-		if err != nil {
+		if err := r.Close(); err != nil {
 			retErr = errors.Join(retErr, err)
 		}
 	}
@@ -220,11 +217,11 @@ func (p *concurrentLineProcessor) readAsChunks(ctx context.Context) error {
 
 func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int, r io.ReadCloser) error {
 	var (
+		chunkID int
+
 		leftOver = make([]byte, 0, maxLineLength)
 		currBuff = p.newChunkFromPool(-1, -1) // temporary buffer for reading
-		chunkID  = 1
 	)
-
 	defer p.putChunkToPool(currBuff)
 
 	for {
@@ -235,13 +232,11 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 
 		chunk := p.newChunkFromPool(chunkID, readerID)
 		copied := moveAllData(chunk, 0, leftOver)
-		leftOver = leftOver[:0] // reset leftOver
-		chunk.endingPos = copied
 
-		read, err := r.Read(currBuff.data)
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				return err
+		read, readErr := r.Read(currBuff.data)
+		if readErr != nil {
+			if !errors.Is(readErr, io.EOF) {
+				return readErr
 			}
 			if copied > 0 {
 				if err := sendToStream(ctx, p.inStream, chunk); err != nil {
@@ -252,7 +247,6 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 		}
 
 		moveAllData(chunk, copied, currBuff.data[:read])
-		chunk.endingPos += read
 
 		y, linesToUpdate := trimmedBuff(chunk.data[:chunk.endingPos], p.rowsReadLimit, rr)
 		chunk.endingPos = y
@@ -261,15 +255,17 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 
 		ind := bytes.LastIndex(chunk.data[:chunk.endingPos], []byte{'\n'})
 		if ind == -1 {
-			leftOver = append(leftOver, chunk.data...) // todo: max length case valid here?
+			if chunk.endingPos > maxLineLength {
+				return errors.New("line length exceeds maximum allowed length of " + strconv.Itoa(maxLineLength) + " bytes")
+			}
+			leftOver = append(leftOver[:0], chunk.data...)
 			continue
 		}
 
-		rem := chunk.endingPos - ind
-		if len(leftOver)+rem > maxLineLength {
+		if chunk.endingPos-ind > maxLineLength {
 			return errors.New("line length exceeds maximum allowed length of " + strconv.Itoa(maxLineLength) + " bytes")
 		}
-		leftOver = append(leftOver, chunk.data[ind+1:chunk.endingPos]...)
+		leftOver = append(leftOver[:0], chunk.data[ind+1:chunk.endingPos]...)
 		chunk.endingPos = ind + 1
 
 		if err := sendToStream(ctx, p.inStream, chunk); err != nil {
@@ -333,8 +329,7 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 		}
 		// Learning: writing each line to the output stream one by one drastically worse the performance
 		// due to the number of system calls. It is better to write the whole chunk at once to the output stream
-		moved := moveAllData(resChunk, resChunk.endingPos, pb)
-		resChunk.endingPos += moved
+		moveAllData(resChunk, resChunk.endingPos, pb)
 
 		AppendNewLine(resChunk)
 		lineStart = lineEnd + 1
@@ -449,9 +444,9 @@ func (p *concurrentLineProcessor) newChunkFromPool(chunkID, readerID int) *Chunk
 }
 
 func moveAllData(chunk *Chunk, start int, src []byte) int {
-	copied := copy(chunk.data[start:], src)
-	if copied < len(src) {
+	if copied := copy(chunk.data[start:], src); copied < len(src) {
 		chunk.data = append(chunk.data, src[copied:]...) // append the remaining bytes
 	}
+	chunk.endingPos += len(src)
 	return len(src)
 }
