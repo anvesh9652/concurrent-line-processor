@@ -1,11 +1,14 @@
 package concurrentlineprocessor
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
 	"path"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 var files = []string{
@@ -16,14 +19,40 @@ var files = []string{
 }
 
 /*
+benchstat <(go test -benchmem -run=^$ -bench="^(BenchmarkParallelReader|BenchmarkNormalReader)$" -cpu=4 -count=6 -benchtime=5s .)
 goos: darwin
 goarch: arm64
 pkg: github.com/anvesh9652/concurrent-line-processor
 cpu: Apple M1 Pro
-BenchmarkNormalReader/NormalReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv-10         	    9636	    113762 ns/op	     209 B/op	       4 allocs/op
-BenchmarkNormalReader/NormalReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-details.jsonl-10   	     568	   2678503 ns/op	     239 B/op	       4 allocs/op
-PASS
-ok  	github.com/anvesh9652/concurrent-line-processor	2.935s
+                                                         │  /dev/fd/11  │
+                                                         │    sec/op    │
+NormalReader/NormalReader-temp_example.csv-4               95.27µ ±  4%
+NormalReader/NormalReader-2024-06-04-details.jsonl-4       2.321m ± 10%
+NormalReader/NormalReader-usage_data_12m.json-4             3.695 ± 11%
+ParallelReader/ParallelReader-temp_example.csv-4           169.5µ ± 15%
+ParallelReader/ParallelReader-2024-06-04-details.jsonl-4   3.151m ±  9%
+ParallelReader/ParallelReader-usage_data_12m.json-4         3.923 ± 10%
+geomean                                                    10.94m
+
+                                                         │  /dev/fd/11   │
+                                                         │     B/op      │
+NormalReader/NormalReader-temp_example.csv-4                 288.0 ±  0%
+NormalReader/NormalReader-2024-06-04-details.jsonl-4         289.0 ±  1%
+NormalReader/NormalReader-usage_data_12m.json-4            4.559Ki ± 88%
+ParallelReader/ParallelReader-temp_example.csv-4           253.3Ki ±  1%
+ParallelReader/ParallelReader-2024-06-04-details.jsonl-4   1.813Mi ±  7%
+ParallelReader/ParallelReader-usage_data_12m.json-4        18.14Mi ± 26%
+geomean                                                    38.31Ki
+
+                                                         │ /dev/fd/11  │
+                                                         │  allocs/op  │
+NormalReader/NormalReader-temp_example.csv-4               5.000 ± 20%
+NormalReader/NormalReader-2024-06-04-details.jsonl-4       5.000 ± 20%
+NormalReader/NormalReader-usage_data_12m.json-4            8.000 ± 12%
+ParallelReader/ParallelReader-temp_example.csv-4           66.00 ±  0%
+ParallelReader/ParallelReader-2024-06-04-details.jsonl-4   108.0 ±  4%
+ParallelReader/ParallelReader-usage_data_12m.json-4        588.0 ± 23%
+geomean                                                    30.71
 */
 
 func BenchmarkNormalReader(b *testing.B) {
@@ -31,159 +60,128 @@ func BenchmarkNormalReader(b *testing.B) {
 		_, name := path.Split(f)
 		b.Run(fmt.Sprintf("NormalReader-%s", name), func(b *testing.B) {
 			for b.Loop() {
-				r, err := getFileReader(f)
-				FailOnErrorB(b, err)
-				FailOnErrorB(b, handleReadWrites(r))
-				r.Close()
+				r, err := os.Open(f)
+				require.NoError(b, err)
+				defer r.Close()
+
+				_, err = io.Copy(io.Discard, r)
+				require.NoError(b, err)
 			}
 		})
 	}
 }
-
-/*
-Old(master) code stats:
-goos: darwin
-goarch: arm64
-pkg: github.com/anvesh9652/concurrent-line-processor
-cpu: Apple M1 Pro
-BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv-10         	    7088	    166716 ns/op	  323478 B/op	      61 allocs/op
-BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-details.jsonl-10  	     445	   3055034 ns/op	 1981411 B/op	     595 allocs/op
-PASS
-ok  	github.com/anvesh9652/concurrent-line-processor	2.713s
---------
-=> new processSingleChunk function; no sync pool for line details
-goos: darwin
-goarch: arm64
-pkg: github.com/anvesh9652/concurrent-line-processor
-cpu: Apple M1 Pro
-BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv-10         	    6495	    175650 ns/op	  318295 B/op	      71 allocs/op
-BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-details.jsonl-10  	     398	   3072475 ns/op	 2196996 B/op	     857 allocs/op
-PASS
-ok  	github.com/anvesh9652/concurrent-line-processor	2.861s
-
-----------------------
-=> added sync.Pool for LineDetails
-
-Running tool: /Users/agali/installations/go/bin/go test -benchmem -run=^$ -bench ^BenchmarkParallelReader$ github.com/anvesh9652/concurrent-line-processor
-
-goos: darwin
-goarch: arm64
-pkg: github.com/anvesh9652/concurrent-line-processor
-cpu: Apple M1 Pro
-BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv-10         	    6060	    178646 ns/op	  313410 B/op	      72 allocs/op
-BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-details.jsonl-10  	     427	   2890153 ns/op	 2191572 B/op	     617 allocs/op
-BenchmarkParallelReader/ParallelReader_-_/Users/agali/Downloads/temp/my_data/usage_data_12m.json-10                                                     	       1	4269672375 ns/op	20585568 B/op	  525084 allocs/op
-PASS
-ok  	github.com/anvesh9652/concurrent-line-processor	8.107s
-
-----------------------
--- Current Final Version Stats --
-goos: darwin
-goarch: arm64
-pkg: github.com/anvesh9652/concurrent-line-processor
-cpu: Apple M1 Pro
-BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv-10         	    7879	    148830 ns/op	  273712 B/op	      64 allocs/op
-BenchmarkParallelReader/ParallelReader_-_/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-details.jsonl-10  	     414	   3345926 ns/op	 2563337 B/op	     126 allocs/op
-BenchmarkParallelReader/ParallelReader_-_/Users/agali/Downloads/temp/my_data/usage_data_12m.json-10                                                     	       1	3877387209 ns/op	 4337072 B/op	     295 allocs/op
-PASS
-ok  	github.com/anvesh9652/concurrent-line-processor	6.653s
-
-12m rows: 99.9438185128% allocations reduced
-*/
-
-/*
-benchstat <(GOMAXPROCS=5 go test -benchmem -run=^$ -bench="^(BenchmarkParallelReader|BenchmarkNormalReader)$" -count 6 .)
-goos: darwin
-goarch: arm64
-pkg: github.com/anvesh9652/concurrent-line-processor
-cpu: Apple M1 Pro
-                                                         │  /dev/fd/11  │
-                                                         │    sec/op    │
-NormalReader/NormalReader-temp_example.csv-5               96.85µ ±  6%
-NormalReader/NormalReader-2024-06-04-details.jsonl-5       2.409m ± 24%
-NormalReader/NormalReader-usage_data_12m.json-5             3.549 ±  9%
-ParallelReader/ParallelReader-temp_example.csv-5           138.2µ ± 24%
-ParallelReader/ParallelReader-2024-06-04-details.jsonl-5   3.132m ± 14%
-ParallelReader/ParallelReader-usage_data_12m.json-5         4.090 ± 12%
-geomean                                                    10.66m
-
-                                                         │   /dev/fd/11   │
-                                                         │      B/op      │
-NormalReader/NormalReader-temp_example.csv-5                 224.0 ±   0%
-NormalReader/NormalReader-2024-06-04-details.jsonl-5         240.0 ±   6%
-NormalReader/NormalReader-usage_data_12m.json-5              888.0 ± 925%
-ParallelReader/ParallelReader-temp_example.csv-5           249.6Ki ±   0%
-ParallelReader/ParallelReader-2024-06-04-details.jsonl-5   2.071Mi ±  18%
-ParallelReader/ParallelReader-usage_data_12m.json-5        13.49Mi ±  56%
-geomean                                                    26.22Ki
-
-                                                         │ /dev/fd/11  │
-                                                         │  allocs/op  │
-NormalReader/NormalReader-temp_example.csv-5               4.000 ±  0%
-NormalReader/NormalReader-2024-06-04-details.jsonl-5       4.000 ±  0%
-NormalReader/NormalReader-usage_data_12m.json-5            6.000 ± 33%
-ParallelReader/ParallelReader-temp_example.csv-5           66.00 ±  0%
-ParallelReader/ParallelReader-2024-06-04-details.jsonl-5   117.5 ±  8%
-ParallelReader/ParallelReader-usage_data_12m.json-5        507.0 ± 44%
-geomean                                                    26.88
-
-*/
 
 func BenchmarkParallelReader(b *testing.B) {
 	for _, f := range files {
 		_, name := path.Split(f)
 		b.Run(fmt.Sprintf("ParallelReader-%s", name), func(b *testing.B) {
 			for b.Loop() {
-				r, err := getFileReader(f)
-				FailOnErrorB(b, err)
+				r, err := os.Open(f)
+				require.NoError(b, err)
+
 				pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte, _ *LineDetails) ([]byte, error) {
 					return b, nil
 				}), WithWorkers(5))
-				defer pr.Close()
-				FailOnErrorB(b, handleReadWrites(pr))
+
+				_, err = io.Copy(io.Discard, pr)
+				require.NoError(b, err)
+
+				err = pr.Close()
+				require.NoError(b, err)
 			}
 		})
 	}
 }
 
-func TestParallelReader(t *testing.T) {
-	t.Run("Run Test", func(t *testing.T) {
-		r, err := getFileReader(files[1])
-		FailOnErrorT(t, err)
-		pr := NewTestParallelReader(r)
-		defer pr.Close()
-		err = handleReadWrites(pr)
-		fmt.Println(pr.RowsRead())
-		FailOnErrorT(t, err)
-	})
-}
+/*
+benchstat <(go test -benchmem -run=^$ -bench="^(BenchmarkUppercaseTransform)" -cpu=4 -count=6 -benchtime=5s .)
+goos: darwin
+goarch: arm64
+pkg: github.com/anvesh9652/concurrent-line-processor
+cpu: Apple M1 Pro
+                                                                                              │  /dev/fd/11  │
+                                                                                              │    sec/op    │
+UppercaseTransform_NormalWay/NormalWay-temp_example.csv-4                                       110.0µ ± 15%
+UppercaseTransform_NormalWay/NormalWay-2024-06-04-details.jsonl-4                               16.55m ±  4%
+UppercaseTransform_NormalWay/NormalWay-usage_data_12m.json-4                                     19.79 ±  2%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-temp_example.csv-4           170.5µ ±  7%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-2024-06-04-details.jsonl-4   5.910m ±  2%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-usage_data_12m.json-4         5.298 ±  4%
+geomean                                                                                         24.03m
 
-func NewTestParallelReader(r io.ReadCloser) *concurrentLineProcessor {
-	custOp := func(b []byte, _ *LineDetails) ([]byte, error) {
-		return b, nil
+                                                                                              │  /dev/fd/11  │
+                                                                                              │     B/op     │
+UppercaseTransform_NormalWay/NormalWay-temp_example.csv-4                                       4.376Ki ± 0%
+UppercaseTransform_NormalWay/NormalWay-2024-06-04-details.jsonl-4                               16.59Ki ± 0%
+UppercaseTransform_NormalWay/NormalWay-usage_data_12m.json-4                                    11.97Mi ± 0%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-temp_example.csv-4           258.2Ki ± 0%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-2024-06-04-details.jsonl-4   18.46Mi ± 1%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-usage_data_12m.json-4        22.91Mi ± 0%
+geomean                                                                                         683.5Ki
+
+                                                                                              │ /dev/fd/11  │
+                                                                                              │  allocs/op  │
+UppercaseTransform_NormalWay/NormalWay-temp_example.csv-4                                        46.00 ± 0%
+UppercaseTransform_NormalWay/NormalWay-2024-06-04-details.jsonl-4                               12.56k ± 0%
+UppercaseTransform_NormalWay/NormalWay-usage_data_12m.json-4                                    12.55M ± 0%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-temp_example.csv-4            66.00 ± 0%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-2024-06-04-details.jsonl-4    471.0 ± 1%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-usage_data_12m.json-4         648.0 ± 6%
+geomean                                                                                         2.295k
+*/
+
+func BenchmarkUppercaseTransform_NormalWay(b *testing.B) {
+	for _, f := range files {
+		_, name := path.Split(f)
+		b.Run(fmt.Sprintf("NormalWay-%s", name), func(b *testing.B) {
+			for b.Loop() {
+				r, err := os.Open(f)
+				require.NoError(b, err)
+				w := io.Discard
+
+				scanner := bufio.NewScanner(r)
+				for scanner.Scan() {
+					line := scanner.Bytes()
+					toUpperASCII(line)
+					_, _ = w.Write(line)
+					_, _ = w.Write([]byte{'\n'})
+				}
+
+				require.NoError(b, scanner.Err())
+				require.NoError(b, r.Close())
+			}
+		})
 	}
-	return NewConcurrentLineProcessor(r, WithCustomLineProcessor(custOp), WithWorkers(1))
 }
 
-// FailOnErrorB reports an error in a benchmark if err is not nil.
-func FailOnErrorB(b *testing.B, err error) {
-	if err != nil {
-		b.Error(err)
+func BenchmarkUppercaseTransform_ConcurrentLineProcessor(b *testing.B) {
+	for _, f := range files {
+		_, name := path.Split(f)
+		b.Run(fmt.Sprintf("ConcurrentLineProcessor-%s", name), func(b *testing.B) {
+			for b.Loop() {
+				r, err := os.Open(f)
+				require.NoError(b, err)
+
+				pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(line []byte, _ *LineDetails) ([]byte, error) {
+					toUpperASCII(line)
+					return line, nil
+				}), WithWorkers(5))
+
+				_, err = io.Copy(io.Discard, pr)
+				require.NoError(b, err)
+
+				err = pr.Close()
+				require.NoError(b, err)
+			}
+		})
 	}
 }
 
-// FailOnErrorT reports an error in a test if err is not nil.
-func FailOnErrorT(t *testing.T, err error) {
-	if err != nil {
-		t.Error(err)
+// toUpperASCII uppercases ASCII letters in-place.
+func toUpperASCII(b []byte) {
+	for i := range b {
+		if 'a' <= b[i] && b[i] <= 'z' {
+			b[i] = b[i] - 32
+		}
 	}
-}
-
-func getFileReader(file string) (io.ReadCloser, error) {
-	return os.Open(file)
-}
-
-func handleReadWrites(r io.Reader) error {
-	_, err := io.Copy(io.Discard, r)
-	return err
 }

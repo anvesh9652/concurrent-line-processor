@@ -217,7 +217,7 @@ func (p *concurrentLineProcessor) readAsChunks(ctx context.Context) error {
 
 func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int, r io.ReadCloser) error {
 	var (
-		chunkID int
+		chunkID, linesToUpdate int
 
 		leftOver = make([]byte, 0, maxLineLength)
 		currBuff = p.newChunkFromPool(-1, -1) // temporary buffer for reading
@@ -247,9 +247,7 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 		}
 
 		moveAllData(chunk, copied, currBuff.data[:read])
-
-		y, linesToUpdate := trimmedBuff(chunk.data[:chunk.endingPos], p.rowsReadLimit, rr)
-		chunk.endingPos = y
+		chunk.endingPos, linesToUpdate = trimmedBuff(chunk.data[:chunk.endingPos], p.rowsReadLimit, rr)
 		atomic.AddInt64(&p.metrics.RowsRead, int64(linesToUpdate))
 		atomic.AddInt64(&p.metrics.BytesRead, int64(read))
 
@@ -265,9 +263,9 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 		if chunk.endingPos-ind > maxLineLength {
 			return errors.New("line length exceeds maximum allowed length of " + strconv.Itoa(maxLineLength) + " bytes")
 		}
+
 		leftOver = append(leftOver[:0], chunk.data[ind+1:chunk.endingPos]...)
 		chunk.endingPos = ind + 1
-
 		if err := sendToStream(ctx, p.inStream, chunk); err != nil {
 			return err
 		}
@@ -299,12 +297,15 @@ func (p *concurrentLineProcessor) processChunks(ctx context.Context) error {
 func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk *Chunk) error {
 	if !p.hasCustomLineProcessor {
 		AppendNewLine(chunk)
+		chunk.rowsWritten += int64(bytes.Count(chunk.data[:chunk.endingPos], []byte("\n")))
 		return sendToStream(ctx, p.outStream, chunk)
 	}
 
 	var (
 		lineDetails = p.lineDetailsPool.Get().(*LineDetails)
 		data        = chunk.data[:chunk.endingPos]
+
+		lineStart, ind, lineEnd int
 	)
 
 	// put the original chunk data back to the pool
@@ -314,7 +315,6 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 	lineDetails.ChunkID, lineDetails.ReaderID = chunk.id, chunk.readerID
 	resChunk := p.newChunkFromPool(chunk.id, chunk.readerID)
 
-	var lineStart, ind, lineEnd int
 	for lineStart < len(data) {
 		ind = bytes.IndexByte(data[lineStart:], '\n')
 		lineEnd = lineStart + ind // the ind is relative to buff passed to IndexByte
@@ -327,14 +327,17 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 			p.putChunkToPool(resChunk)
 			return err
 		}
-		// Learning: writing each line to the output stream one by one drastically worse the performance
-		// due to the number of system calls. It is better to write the whole chunk at once to the output stream
-		moveAllData(resChunk, resChunk.endingPos, pb)
 
+		moveAllData(resChunk, resChunk.endingPos, pb)
 		AppendNewLine(resChunk)
+
 		lineStart = lineEnd + 1
 	}
 
+	// Learning: writing each line to the output stream one by one drastically worse the performance
+	// due to the channels getting blocked for after few single line writes
+	// It is better to write the whole chunk at once to the output stream
+	resChunk.rowsWritten += int64(bytes.Count(resChunk.data[:resChunk.endingPos], []byte("\n")))
 	return sendToStream(ctx, p.outStream, resChunk)
 }
 
@@ -354,7 +357,7 @@ func (p *concurrentLineProcessor) writeProcessedData(ctx context.Context) error 
 			}
 
 			atomic.AddInt64(&p.metrics.BytesWritten, int64(n))
-			atomic.AddInt64(&p.metrics.RowsWritten, int64(bytes.Count(chunk.data[:chunk.endingPos], []byte{'\n'})))
+			atomic.AddInt64(&p.metrics.RowsWritten, chunk.rowsWritten)
 			return nil
 		}
 		if err := write(chunk); err != nil {
@@ -439,7 +442,7 @@ func (p *concurrentLineProcessor) newChunkFromPool(chunkID, readerID int) *Chunk
 	// Reslicing prevents the reuse of larger buffers (in ⁠.Read) that were created by appends.
 	// When a grown buffer is returned to the pool, appending makes it even larger.
 	chunk.data = chunk.data[:p.chunkSize]
-	chunk.id, chunk.readerID, chunk.endingPos = chunkID, readerID, 0
+	chunk.id, chunk.readerID, chunk.endingPos, chunk.rowsWritten = chunkID, readerID, 0, 0
 	return chunk
 }
 

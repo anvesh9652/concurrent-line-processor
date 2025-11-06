@@ -18,6 +18,12 @@ func TestNewReader_ReadsAllLines(t *testing.T) {
 	out, err := io.ReadAll(pr)
 	assert.NoError(t, err)
 	assert.Equal(t, input, string(out))
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(3), metrics.RowsRead)
+	assert.Equal(t, int64(3), metrics.RowsWritten)
+	assert.Equal(t, int64(len(input)), metrics.BytesRead)
+	assert.Equal(t, int64(len(out)), metrics.BytesWritten)
 	assert.Equal(t, 3, pr.RowsRead())
 }
 
@@ -31,6 +37,12 @@ func TestNewReader_CustomLineProcessor(t *testing.T) {
 	assert.NoError(t, err)
 	expected := "A\nB\nC\n"
 	assert.Equal(t, expected, string(out))
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(3), metrics.RowsRead)
+	assert.Equal(t, int64(3), metrics.RowsWritten)
+	assert.Equal(t, int64(len(input)), metrics.BytesRead)
+	assert.Equal(t, int64(len(out)), metrics.BytesWritten)
 }
 
 func TestNewReader_CustomProcessorReturnsNil(t *testing.T) {
@@ -67,6 +79,12 @@ func TestNewReader_EmptyInput(t *testing.T) {
 	out, err := io.ReadAll(pr)
 	assert.NoError(t, err)
 	assert.Empty(t, out)
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(0), metrics.RowsRead)
+	assert.Equal(t, int64(0), metrics.RowsWritten)
+	assert.Equal(t, int64(0), metrics.BytesRead)
+	assert.Equal(t, int64(0), metrics.BytesWritten)
 	assert.Equal(t, 0, pr.RowsRead())
 }
 
@@ -78,6 +96,11 @@ func TestNewReader_RowsReadLimit(t *testing.T) {
 	assert.NoError(t, err)
 	expected := "1\n2\n3\n"
 	assert.Equal(t, expected, string(out))
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(3), metrics.RowsRead)
+	assert.Equal(t, int64(3), metrics.RowsWritten)
+	assert.Equal(t, int64(len(out)), metrics.BytesWritten)
 	assert.Equal(t, 3, pr.RowsRead())
 }
 
@@ -101,11 +124,18 @@ func TestNewReader_LargeInput(t *testing.T) {
 	for i := 0; i < 10000; i++ {
 		sb.WriteString("row\n")
 	}
-	r := newReadCloser(sb.String())
+	input := sb.String()
+	r := newReadCloser(input)
 	pr := NewConcurrentLineProcessor(r)
 	out, err := io.ReadAll(pr)
 	assert.NoError(t, err)
-	assert.Equal(t, sb.Len(), len(out))
+	assert.Equal(t, len(input), len(out))
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(10000), metrics.RowsRead)
+	assert.Equal(t, int64(10000), metrics.RowsWritten)
+	assert.Equal(t, int64(len(input)), metrics.BytesRead)
+	assert.Equal(t, int64(len(out)), metrics.BytesWritten)
 	assert.Equal(t, 10000, pr.RowsRead())
 }
 
@@ -117,6 +147,13 @@ func TestNewReader_AlwaysNewlineAtEnd(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotEmpty(t, out)
 	assert.Equal(t, byte('\n'), out[len(out)-1], "expected output to have trailing newline")
+
+	metrics := pr.Metrics()
+	// Input "foo\nbar\nbaz" has only 2 lines ending with newlines
+	// The processor counts rows by newlines in input
+	assert.Equal(t, int64(2), metrics.RowsRead)
+	assert.Equal(t, int64(3), metrics.RowsWritten)
+	assert.Greater(t, metrics.BytesWritten, int64(0))
 }
 
 func TestNewReader_Concurrency(t *testing.T) {
@@ -126,6 +163,12 @@ func TestNewReader_Concurrency(t *testing.T) {
 	out, err := io.ReadAll(pr)
 	assert.NoError(t, err)
 	assert.Equal(t, input, string(out))
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(10), metrics.RowsRead)
+	assert.Equal(t, int64(10), metrics.RowsWritten)
+	assert.Equal(t, int64(len(input)), metrics.BytesRead)
+	assert.Equal(t, int64(len(out)), metrics.BytesWritten)
 	assert.Equal(t, 10, pr.RowsRead())
 }
 
@@ -150,6 +193,12 @@ func TestNewReader_SmallChunkSize_OrderNotGuaranteed(t *testing.T) {
 	for l, c := range lineCount {
 		assert.Equal(t, 0, c, "line %q count mismatch", l)
 	}
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(5), metrics.RowsRead)
+	assert.Equal(t, int64(5), metrics.RowsWritten)
+	assert.Equal(t, int64(len(input)), metrics.BytesRead)
+	assert.Greater(t, metrics.BytesWritten, int64(0))
 }
 
 func TestNewReader_MultipleReaders(t *testing.T) {
@@ -177,6 +226,12 @@ func TestNewReader_MultipleReaders(t *testing.T) {
 	for l, c := range lineCount {
 		assert.Equal(t, 0, c, "line %q count mismatch", l)
 	}
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(4), metrics.RowsRead)
+	assert.Equal(t, int64(4), metrics.RowsWritten)
+	assert.Greater(t, metrics.BytesRead, int64(0))
+	assert.Greater(t, metrics.BytesWritten, int64(0))
 	assert.Equal(t, 4, pr.RowsRead())
 }
 
@@ -214,6 +269,12 @@ func TestNewReader_MultipleReadersLargeInput(t *testing.T) {
 	for prefix, remaining := range expectedCounts {
 		assert.Equal(t, 0, remaining, "prefix %q count mismatch", prefix)
 	}
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(readersCount*linesPerReader), metrics.RowsRead)
+	assert.Equal(t, int64(readersCount*linesPerReader), metrics.RowsWritten)
+	assert.Greater(t, metrics.BytesRead, int64(0))
+	assert.Greater(t, metrics.BytesWritten, int64(0))
 	assert.Equal(t, readersCount*linesPerReader, pr.RowsRead())
 }
 

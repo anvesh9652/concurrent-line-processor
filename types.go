@@ -31,6 +31,9 @@ type Chunk struct {
 	// We don't want to do keep reslicing the data, use copy over append
 	// So we keep track of where the data ends. data after this point is a junk.
 	endingPos int
+
+	// rowsWritten keeps track of how many rows were written in this chunk after processing.
+	rowsWritten int64
 }
 
 // LineDetails provides contextual information about a line being processed.
