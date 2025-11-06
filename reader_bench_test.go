@@ -101,23 +101,23 @@ pkg: github.com/anvesh9652/concurrent-line-processor
 cpu: Apple M1 Pro
                                                                                               │  /dev/fd/11  │
                                                                                               │    sec/op    │
-UppercaseTransform_NormalWay/NormalWay-temp_example.csv-4                                       110.0µ ± 15%
-UppercaseTransform_NormalWay/NormalWay-2024-06-04-details.jsonl-4                               16.55m ±  4%
-UppercaseTransform_NormalWay/NormalWay-usage_data_12m.json-4                                     19.79 ±  2%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-temp_example.csv-4           170.5µ ±  7%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-2024-06-04-details.jsonl-4   5.910m ±  2%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-usage_data_12m.json-4         5.298 ±  4%
-geomean                                                                                         24.03m
+UppercaseTransform_NormalWay/NormalWay-temp_example.csv-4                                       105.5µ ±  6%
+UppercaseTransform_NormalWay/NormalWay-2024-06-04-details.jsonl-4                               15.52m ±  3%
+UppercaseTransform_NormalWay/NormalWay-usage_data_12m.json-4                                     19.30 ±  3%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-temp_example.csv-4           162.8µ ± 18%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-2024-06-04-details.jsonl-4   5.923m ±  3%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-usage_data_12m.json-4         5.150 ±  2%
+geomean                                                                                         23.22m
 
                                                                                               │  /dev/fd/11  │
                                                                                               │     B/op     │
 UppercaseTransform_NormalWay/NormalWay-temp_example.csv-4                                       4.376Ki ± 0%
 UppercaseTransform_NormalWay/NormalWay-2024-06-04-details.jsonl-4                               16.59Ki ± 0%
 UppercaseTransform_NormalWay/NormalWay-usage_data_12m.json-4                                    11.97Mi ± 0%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-temp_example.csv-4           258.2Ki ± 0%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-2024-06-04-details.jsonl-4   18.46Mi ± 1%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-usage_data_12m.json-4        22.91Mi ± 0%
-geomean                                                                                         683.5Ki
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-temp_example.csv-4           258.1Ki ± 0%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-2024-06-04-details.jsonl-4   18.72Mi ± 1%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-usage_data_12m.json-4        22.95Mi ± 0%
+geomean                                                                                         685.2Ki
 
                                                                                               │ /dev/fd/11  │
                                                                                               │  allocs/op  │
@@ -125,9 +125,9 @@ UppercaseTransform_NormalWay/NormalWay-temp_example.csv-4                       
 UppercaseTransform_NormalWay/NormalWay-2024-06-04-details.jsonl-4                               12.56k ± 0%
 UppercaseTransform_NormalWay/NormalWay-usage_data_12m.json-4                                    12.55M ± 0%
 UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-temp_example.csv-4            66.00 ± 0%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-2024-06-04-details.jsonl-4    471.0 ± 1%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-usage_data_12m.json-4         648.0 ± 6%
-geomean                                                                                         2.295k
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-2024-06-04-details.jsonl-4    476.0 ± 1%
+UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-usage_data_12m.json-4         653.0 ± 4%
+geomean                                                                                         2.302k
 */
 
 func BenchmarkUppercaseTransform_NormalWay(b *testing.B) {

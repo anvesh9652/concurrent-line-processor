@@ -2,11 +2,13 @@ package concurrentlineprocessor
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -276,6 +278,82 @@ func TestNewReader_MultipleReadersLargeInput(t *testing.T) {
 	assert.Greater(t, metrics.BytesRead, int64(0))
 	assert.Greater(t, metrics.BytesWritten, int64(0))
 	assert.Equal(t, readersCount*linesPerReader, pr.RowsRead())
+}
+
+func TestNewReader_WithContext(t *testing.T) {
+	t.Run("context timeout", func(t *testing.T) {
+		// Create a large input that takes time to process
+		const lines = 1000000
+		var sb strings.Builder
+		for i := 0; i < lines; i++ {
+			sb.WriteString("row:")
+			sb.WriteString(strconv.Itoa(i))
+			sb.WriteByte('\n')
+		}
+
+		r := newReadCloser(sb.String())
+
+		// Create a context with very short timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Nanosecond)
+		defer cancel()
+
+		pr := NewConcurrentLineProcessor(r, WithContext(ctx), WithWorkers(4))
+		defer pr.Close()
+
+		// Try to read all - should fail due to context timeout
+		_, err := io.ReadAll(pr)
+		assert.Error(t, err)
+		if err != nil {
+			assert.Contains(t, err.Error(), "context deadline exceeded")
+		}
+	})
+
+	t.Run("context cancellation", func(t *testing.T) {
+		// Create a large input
+		const lines = 50000
+		var sb strings.Builder
+		for i := 0; i < lines; i++ {
+			sb.WriteString("row:")
+			sb.WriteString(strconv.Itoa(i))
+			sb.WriteByte('\n')
+		}
+
+		r := newReadCloser(sb.String())
+
+		// Create a cancellable context
+		ctx, cancel := context.WithCancel(context.Background())
+
+		pr := NewConcurrentLineProcessor(r, WithContext(ctx), WithWorkers(2))
+		defer pr.Close()
+
+		// Cancel immediately after starting
+		cancel()
+
+		// Try to read - should fail due to context cancellation
+		_, err := io.ReadAll(pr)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "context canceled")
+	})
+
+	t.Run("context with sufficient timeout succeeds", func(t *testing.T) {
+		// Test that context with sufficient timeout works fine
+		input := "line1\nline2\nline3\n"
+		r := newReadCloser(input)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		pr := NewConcurrentLineProcessor(r, WithContext(ctx))
+		defer pr.Close()
+
+		out, err := io.ReadAll(pr)
+		assert.NoError(t, err)
+		assert.Equal(t, input, string(out))
+
+		metrics := pr.Metrics()
+		assert.Equal(t, int64(3), metrics.RowsRead)
+		assert.Equal(t, int64(3), metrics.RowsWritten)
+	})
 }
 
 func newReadCloser(input string) io.ReadCloser {

@@ -217,7 +217,7 @@ func (p *concurrentLineProcessor) readAsChunks(ctx context.Context) error {
 
 func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int, r io.ReadCloser) error {
 	var (
-		chunkID, linesToUpdate int
+		chunkID, linesToUpdate, rr int
 
 		leftOver = make([]byte, 0, maxLineLength)
 		currBuff = p.newChunkFromPool(-1, -1) // temporary buffer for reading
@@ -225,8 +225,7 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 	defer p.putChunkToPool(currBuff)
 
 	for {
-		rr := p.RowsRead()
-		if p.rowsReadLimit != -1 && rr >= p.rowsReadLimit { // If rowsReadLimit is set, check if it has been reached
+		if rr = p.RowsRead(); p.rowsReadLimit != -1 && rr >= p.rowsReadLimit { // If rowsReadLimit is set, check if it has been reached
 			break
 		}
 
