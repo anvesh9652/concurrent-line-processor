@@ -237,12 +237,13 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 			if !errors.Is(readErr, io.EOF) {
 				return readErr
 			}
+
+			var err error
 			if copied > 0 {
-				if err := sendToStream(ctx, p.inStream, chunk); err != nil {
-					return err
-				}
+				atomic.AddInt64(&p.metrics.RowsRead, 1) // if we are here then it's the last line without "\n" at end
+				err = sendToStream(ctx, p.inStream, chunk)
 			}
-			return nil
+			return err
 		}
 
 		moveAllData(chunk, copied, currBuff.data[:read])
@@ -255,7 +256,7 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 			if chunk.endingPos > maxLineLength {
 				return errors.New("line length exceeds maximum allowed length of " + strconv.Itoa(maxLineLength) + " bytes")
 			}
-			leftOver = append(leftOver[:0], chunk.data...)
+			leftOver = append(leftOver[:0], chunk.data[:chunk.endingPos]...)
 			continue
 		}
 
@@ -295,7 +296,7 @@ func (p *concurrentLineProcessor) processChunks(ctx context.Context) error {
 
 func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk *Chunk) error {
 	if !p.hasCustomLineProcessor {
-		AppendNewLine(chunk)
+		EnsureNewLineAtEnd(chunk)
 		chunk.rowsWritten += int64(bytes.Count(chunk.data[:chunk.endingPos], []byte("\n")))
 		return sendToStream(ctx, p.outStream, chunk)
 	}
@@ -328,7 +329,7 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 		}
 
 		moveAllData(resChunk, resChunk.endingPos, pb)
-		AppendNewLine(resChunk)
+		EnsureNewLineAtEnd(resChunk)
 
 		lineStart = lineEnd + 1
 	}

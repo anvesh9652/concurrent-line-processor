@@ -38,7 +38,7 @@ func ExitOnError(err error) {
 	}
 }
 
-func AppendNewLine(chunk *Chunk) {
+func EnsureNewLineAtEnd(chunk *Chunk) {
 	if chunk == nil || chunk.endingPos == 0 {
 		return
 	}

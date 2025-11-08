@@ -151,9 +151,7 @@ func TestNewReader_AlwaysNewlineAtEnd(t *testing.T) {
 	assert.Equal(t, byte('\n'), out[len(out)-1], "expected output to have trailing newline")
 
 	metrics := pr.Metrics()
-	// Input "foo\nbar\nbaz" has only 2 lines ending with newlines
-	// The processor counts rows by newlines in input
-	assert.Equal(t, int64(2), metrics.RowsRead)
+	assert.Equal(t, int64(3), metrics.RowsRead)
 	assert.Equal(t, int64(3), metrics.RowsWritten)
 	assert.Greater(t, metrics.BytesWritten, int64(0))
 }

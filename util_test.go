@@ -43,32 +43,32 @@ func TestAppendNewLine(t *testing.T) {
 	t.Run("nil chunk does nothing", func(t *testing.T) {
 		// Should not panic
 		assert.NotPanics(t, func() {
-			AppendNewLine(nil)
+			EnsureNewLineAtEnd(nil)
 		})
 	})
 
 	t.Run("chunk with endingPos 0 does nothing", func(t *testing.T) {
 		chunk := &Chunk{data: make([]byte, 10), endingPos: 0}
-		AppendNewLine(chunk)
+		EnsureNewLineAtEnd(chunk)
 		assert.Equal(t, 0, chunk.endingPos)
 	})
 
 	t.Run("chunk without trailing newline adds one", func(t *testing.T) {
 		chunk := &Chunk{data: []byte("hello     "), endingPos: 5}
-		AppendNewLine(chunk)
+		EnsureNewLineAtEnd(chunk)
 		assert.Equal(t, 6, chunk.endingPos)
 		assert.Equal(t, byte('\n'), chunk.data[5])
 	})
 
 	t.Run("chunk with trailing newline does nothing", func(t *testing.T) {
 		chunk := &Chunk{data: []byte("hello\n    "), endingPos: 6}
-		AppendNewLine(chunk)
+		EnsureNewLineAtEnd(chunk)
 		assert.Equal(t, 6, chunk.endingPos)
 	})
 
 	t.Run("chunk at capacity appends newline", func(t *testing.T) {
 		chunk := &Chunk{data: []byte("hello"), endingPos: 5}
-		AppendNewLine(chunk)
+		EnsureNewLineAtEnd(chunk)
 		assert.Equal(t, 6, chunk.endingPos)
 		assert.Equal(t, 6, len(chunk.data))
 		assert.Equal(t, byte('\n'), chunk.data[5])
