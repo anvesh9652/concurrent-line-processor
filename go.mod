@@ -1,9 +1,10 @@
 module github.com/anvesh9652/concurrent-line-processor
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/stretchr/testify v1.11.1
+	github.com/valyala/fastjson v1.6.4
 	golang.org/x/sync v0.15.0
 )
 

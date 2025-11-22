@@ -4,6 +4,7 @@
 package concurrentlineprocessor
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -99,10 +100,16 @@ func FormatDuration(d time.Duration) string {
 	return d.String()
 }
 
-func PrintSummaryPeriodically(p *concurrentLineProcessor) {
-	t := time.NewTicker(5 * time.Second)
-	for range t.C {
-		fmt.Println(p.Summary())
+func PrintSummaryPeriodically(ctx context.Context, p *concurrentLineProcessor, interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			fmt.Println(p.Summary())
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 

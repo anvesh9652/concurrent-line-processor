@@ -189,7 +189,7 @@ func (p *concurrentLineProcessor) start() {
 	eg.Go(func() error { return p.processChunks(ctx) })
 	eg.Go(func() error { return p.writeProcessedData(ctx) })
 
-	// go PrintSummaryPeriodically(p)
+	// go PrintSummaryPeriodically(ctx, p, 5*time.Second)
 
 	// Learning: if a goroutine returns an error, and the other goroutines are still running.
 	// we will not get any error on eg.Wait() if we don't use errgroup with context.

@@ -268,15 +268,15 @@ The `examples/` directory contains complete examples demonstrating:
 
 ## Metrics
 
-The processor provides detailed metrics accessible via `Metrics()`:
+The processor provides detailed metrics accessible via `Metrics()`. They are updated atomically during pipeline execution and the duration is finalized once processing completes (until then `TimeTook` reports the current elapsed time):
 
 ```go
 type Metrics struct {
-    BytesRead        int64  `json:"bytes_read"`        // Total bytes read from source
-    BytesTransformed int64  `json:"bytes_transformed"` // Total bytes after processing each line
-    RowsRead         int64  `json:"rows_read"`         // Total rows processed
-    RowsWritten      int64  `json:"rows_written"`      // Total rows written to the output stream
-    TimeTook         string `json:"time_took"`         // Total processing time
+    BytesRead    int64         `json:"bytes_read"`    // Total bytes read from source (may exceed written when a row limit is applied)
+    BytesWritten int64         `json:"bytes_written"` // Total bytes written after optional transformation
+    RowsRead     int64         `json:"rows_read"`     // Total newline-delimited rows consumed
+    RowsWritten  int64         `json:"rows_written"`  // Total rows emitted to the output stream
+    TimeTook     time.Duration `json:"time_took"`     // Elapsed or finalized processing duration
 }
 ```
 

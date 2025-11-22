@@ -59,6 +59,7 @@ func BenchmarkNormalReader(b *testing.B) {
 	for _, f := range files {
 		_, name := path.Split(f)
 		b.Run(fmt.Sprintf("NormalReader-%s", name), func(b *testing.B) {
+			reportFileSize(b, f)
 			for b.Loop() {
 				r, err := os.Open(f)
 				require.NoError(b, err)
@@ -75,6 +76,7 @@ func BenchmarkParallelReader(b *testing.B) {
 	for _, f := range files {
 		_, name := path.Split(f)
 		b.Run(fmt.Sprintf("ParallelReader-%s", name), func(b *testing.B) {
+			reportFileSize(b, f)
 			for b.Loop() {
 				r, err := os.Open(f)
 				require.NoError(b, err)
@@ -85,9 +87,7 @@ func BenchmarkParallelReader(b *testing.B) {
 
 				_, err = io.Copy(io.Discard, pr)
 				require.NoError(b, err)
-
-				err = pr.Close()
-				require.NoError(b, err)
+				require.NoError(b, pr.Close())
 			}
 		})
 	}
@@ -134,11 +134,13 @@ func BenchmarkUppercaseTransform_NormalWay(b *testing.B) {
 	for _, f := range files {
 		_, name := path.Split(f)
 		b.Run(fmt.Sprintf("NormalWay-%s", name), func(b *testing.B) {
+			reportFileSize(b, f)
 			for b.Loop() {
 				r, err := os.Open(f)
 				require.NoError(b, err)
-				w := io.Discard
+				defer r.Close()
 
+				w := io.Discard
 				scanner := bufio.NewScanner(r)
 				for scanner.Scan() {
 					line := scanner.Bytes()
@@ -146,9 +148,7 @@ func BenchmarkUppercaseTransform_NormalWay(b *testing.B) {
 					_, _ = w.Write(line)
 					_, _ = w.Write([]byte{'\n'})
 				}
-
 				require.NoError(b, scanner.Err())
-				require.NoError(b, r.Close())
 			}
 		})
 	}
@@ -158,6 +158,7 @@ func BenchmarkUppercaseTransform_ConcurrentLineProcessor(b *testing.B) {
 	for _, f := range files {
 		_, name := path.Split(f)
 		b.Run(fmt.Sprintf("ConcurrentLineProcessor-%s", name), func(b *testing.B) {
+			reportFileSize(b, f)
 			for b.Loop() {
 				r, err := os.Open(f)
 				require.NoError(b, err)
@@ -169,9 +170,7 @@ func BenchmarkUppercaseTransform_ConcurrentLineProcessor(b *testing.B) {
 
 				_, err = io.Copy(io.Discard, pr)
 				require.NoError(b, err)
-
-				err = pr.Close()
-				require.NoError(b, err)
+				require.NoError(b, pr.Close())
 			}
 		})
 	}
@@ -184,4 +183,18 @@ func toUpperASCII(b []byte) {
 			b[i] = b[i] - 32
 		}
 	}
+}
+
+func reportFileSize(b *testing.B, f string) {
+	file, err := os.Open(f)
+	require.NoError(b, err)
+	defer file.Close()
+
+	info, err := file.Stat()
+	require.NoError(b, err)
+	size := info.Size()
+
+	b.SetBytes(size) // <-- enables MB/s column
+	b.ReportAllocs() // optional: show allocation stats (benchmem already does)
+	b.ResetTimer()   // optional: make sure setup time is not counted
 }

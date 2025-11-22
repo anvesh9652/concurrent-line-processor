@@ -3,7 +3,7 @@ package codes
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
+	json "encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -12,7 +12,10 @@ import (
 	"sync"
 
 	clp "github.com/anvesh9652/concurrent-line-processor"
+	"github.com/valyala/fastjson"
 )
+
+var parserPool = fastjson.ParserPool{}
 
 func InitConvertJtoC(file string) {
 	f, err := os.Open(file)
@@ -59,7 +62,6 @@ func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 	if _, err := io.Copy(io.Discard, nr); err != nil {
 		return nil, err
 	}
-
 	columns := make([]string, 0, len(keys))
 	for k := range keys {
 		columns = append(columns, k)
@@ -76,20 +78,14 @@ func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
 	}
 
 	customProcessor := func(b []byte, _ *clp.LineDetails) ([]byte, error) {
-		var d map[string]any
-		if err := json.Unmarshal(b, &d); err != nil {
-			return nil, err
-		}
 		buff := buffPool.Get().(*bytes.Buffer)
 		buff.Reset()
-		// build CSV row manually
-		for i, col := range columns {
-			if i > 0 {
-				buff.WriteByte(',')
-			}
-			escapeField(ConvertAnyToString(d[col]), buff)
+
+		// if err := handleLineNormalWay(b, columns, buff); err != nil {
+		if err := hanldeLineWithParser(b, columns, buff); err != nil {
+			return nil, err
 		}
-		buff.WriteByte('\n')
+
 		out := append([]byte(nil), buff.Bytes()...) // copy to avoid data race when buff reused before consumer copies
 		buffPool.Put(buff)
 		return out, nil
@@ -121,18 +117,12 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 	}
 
 	customProcessor := func(b []byte, _ *clp.LineDetails) ([]byte, error) {
-		var d map[string]any
-		if err := json.Unmarshal(b, &d); err != nil {
-			return nil, err
-		}
 		buff := buffPool.Get().(*bytes.Buffer)
 		buff.Reset()
-		// build CSV row manually
-		for i, col := range columns {
-			if i > 0 {
-				buff.WriteByte(',')
-			}
-			escapeField(ConvertAnyToString(d[col]), buff)
+
+		// if err := handleLineNormalWay(b, columns, buff); err != nil {
+		if err := hanldeLineWithParser(b, columns, buff); err != nil {
+			return nil, err
 		}
 		out := append([]byte(nil), buff.Bytes()...) // copy to avoid data race when buff reused before consumer copies
 		buffPool.Put(buff)
@@ -224,17 +214,41 @@ func ConvertAnyToString(v any) string {
 	}
 }
 
-// manual CSV escaping for a single field
-func escapeField(field string, dst *bytes.Buffer) {
-	// need quotes if field contains comma, quote, newline or leading/trailing space
-	needsQuote := strings.ContainsAny(field, ",\n\r\"") || (len(field) > 0 && (field[0] == ' ' || field[len(field)-1] == ' '))
-	if !needsQuote {
-		dst.WriteString(field)
-		return
+func handleLineNormalWay(b []byte, cols []string, w *bytes.Buffer) error {
+	var d map[string]any
+	if err := json.Unmarshal(b, &d); err != nil {
+		return err
 	}
+	// build CSV row manually
+	for i, col := range cols {
+		if i > 0 {
+			w.WriteByte(',')
+		}
+		escapeFieldByte([]byte(ConvertAnyToString(d[col])), w)
+	}
+	return nil
+}
+
+func hanldeLineWithParser(line []byte, cols []string, w *bytes.Buffer) error {
+	parser := parserPool.Get()
+	defer parserPool.Put(parser)
+	v, err := parser.ParseBytes(line)
+	if err != nil {
+		return err
+	}
+	for i, col := range cols {
+		if i > 0 {
+			w.WriteByte(',')
+		}
+		escapeFieldByte(v.Get(col).MarshalTo(nil), w)
+		// escapeFieldByte([]byte(v.Get(col).String()), w)
+	}
+	return nil
+}
+
+func escapeFieldByte(field []byte, dst *bytes.Buffer) {
 	dst.WriteByte('"')
-	for i := 0; i < len(field); i++ {
-		c := field[i]
+	for _, c := range field {
 		if c == '"' { // escape quotes by doubling
 			dst.WriteByte('"')
 		}
