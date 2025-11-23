@@ -10,7 +10,7 @@ A high-performance, concurrent line-by-line processor for large files and stream
 - **Concurrent Processing**: Process lines concurrently with a configurable number of worker goroutines
 - **Memory Efficient**: Uses a `sync.Pool` and streaming; never loads entire file into memory
 - **Customizable**: Supply a thread-safe custom line processor function
-- **Metrics**: Built-in metrics (bytes read, bytes transformed, rows read/written, processing duration)
+- **Metrics**: Built-in metrics (bytes read/written, rows read/written, processing duration)
 - **Standard Interface**: Implements `io.Reader` and has a `Close()` for resource cleanup
 - **Flexible Configuration**: Configure chunk size, worker count, channel size, and row read limit
 - **Multi-source Input**: Merge multiple `io.ReadCloser` inputs into one stream (ordering between sources is nondeterministic)
@@ -268,15 +268,15 @@ The `examples/` directory contains complete examples demonstrating:
 
 ## Metrics
 
-The processor provides detailed metrics accessible via `Metrics()`:
+The processor provides detailed metrics accessible via `Metrics()`. They are updated atomically during pipeline execution and the duration is finalized once processing completes (until then `TimeTook` reports the current elapsed time):
 
 ```go
 type Metrics struct {
-    BytesRead        int64  `json:"bytes_read"`        // Total bytes read from source
-    BytesTransformed int64  `json:"bytes_transformed"` // Total bytes after processing each line
-    RowsRead         int64  `json:"rows_read"`         // Total rows processed
-    RowsWritten      int64  `json:"rows_written"`      // Total rows written to the output stream
-    TimeTook         string `json:"time_took"`         // Total processing time
+    BytesRead    int64         `json:"bytes_read"`    // Total bytes read from source (may exceed written when a row limit is applied)
+    BytesWritten int64         `json:"bytes_written"` // Total bytes written after optional transformation
+    RowsRead     int64         `json:"rows_read"`     // Total newline-delimited rows consumed
+    RowsWritten  int64         `json:"rows_written"`  // Total rows emitted to the output stream
+    TimeTook     time.Duration `json:"time_took"`     // Elapsed or finalized processing duration
 }
 ```
 
@@ -306,6 +306,5 @@ Errors encountered during any stage (reading, processing, writing) propagate thr
 
 ## Future Improvements
 
-- Optional strict ordering mode using sequence numbers
-- Pluggable backpressure / adaptive channel sizing
-- Cancellation API (pass external context)
+
+## Need to work on
