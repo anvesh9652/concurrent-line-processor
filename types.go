@@ -24,8 +24,8 @@ type (
 // Chunk represents a piece of data to be processed, containing an ID for ordering
 // and a pointer to the actual data buffer.
 type Chunk struct {
-	id       int
 	data     []byte
+	id       int
 	readerID int
 
 	// We don't want to do keep reslicing the data, use copy over append
@@ -64,11 +64,29 @@ type Metrics struct {
 // of large files or streams. It implements io.Reader, allowing processed data to be
 // read using standard Go I/O patterns.
 type concurrentLineProcessor struct {
+	chunkPool       sync.Pool
+	lineDetailsPool sync.Pool
+
+	now time.Time
+
 	// ctx is the context for managing cancellation and timeouts.
 	ctx context.Context
 
+	// customLineProcessor allows you to process each line of the input data.
+	// It is not thread-safe. You can't update anything outside of the function unless you use a mutex.
+	customLineProcessor LineProcessor
+
+	inStream  chan *Chunk
+	outStream chan *Chunk
+
+	pr *io.PipeReader
+	pw *io.PipeWriter
+
 	// readers holds multiple source readers for processing.
 	readers []io.ReadCloser
+
+	// metrics holds the metrics of the reading process, such as bytes read/written, rows read/written etc...
+	metrics Metrics
 
 	// chunkSize is the size of each chunk to be read from the source reader.
 	chunkSize int
@@ -80,25 +98,7 @@ type concurrentLineProcessor struct {
 	// rowsReadLimit is the limit on the number of rows to read. Default is -1, which means no limit.
 	rowsReadLimit int
 
-	// customLineProcessor allows you to process each line of the input data.
-	// It is not thread-safe. You can't update anything outside of the function unless you use a mutex.
-	customLineProcessor LineProcessor
-
 	// hasCustomLineProcessor indicates whether a custom line processor is set.
 	// If true, the processor will use the customLineProcessor to process each line.
 	hasCustomLineProcessor bool
-
-	inStream  chan *Chunk
-	outStream chan *Chunk
-
-	chunkPool       sync.Pool
-	lineDetailsPool sync.Pool
-
-	pr *io.PipeReader
-	pw *io.PipeWriter
-
-	now time.Time
-
-	// metrics holds the metrics of the reading process, such as bytes read/written, rows read/written etc...
-	metrics Metrics
 }
