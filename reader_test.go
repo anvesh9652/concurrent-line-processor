@@ -2,11 +2,15 @@ package concurrentlineprocessor
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNewReader_ReadsAllLines(t *testing.T) {
@@ -14,46 +18,76 @@ func TestNewReader_ReadsAllLines(t *testing.T) {
 	r := newReadCloser(input)
 	pr := NewConcurrentLineProcessor(r)
 	out, err := io.ReadAll(pr)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if string(out) != input {
-		t.Errorf("expected %q, got %q", input, string(out))
-	}
-	if pr.RowsRead() != 3 {
-		t.Errorf("expected 3 rows read, got %d", pr.RowsRead())
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, input, string(out))
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(3), metrics.RowsRead)
+	assert.Equal(t, int64(3), metrics.RowsWritten)
+	assert.Equal(t, int64(len(input)), metrics.BytesRead)
+	assert.Equal(t, int64(len(out)), metrics.BytesWritten)
+	assert.Equal(t, 3, pr.RowsRead())
 }
 
 func TestNewReader_CustomLineProcessor(t *testing.T) {
 	input := "a\nb\nc\n"
 	r := newReadCloser(input)
-	pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte) ([]byte, error) {
+	pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte, _ *LineDetails) ([]byte, error) {
 		return bytes.ToUpper(b), nil
 	}))
 	out, err := io.ReadAll(pr)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	assert.NoError(t, err)
 	expected := "A\nB\nC\n"
-	if string(out) != expected {
-		t.Errorf("expected %q, got %q", expected, string(out))
+	assert.Equal(t, expected, string(out))
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(3), metrics.RowsRead)
+	assert.Equal(t, int64(3), metrics.RowsWritten)
+	assert.Equal(t, int64(len(input)), metrics.BytesRead)
+	assert.Equal(t, int64(len(out)), metrics.BytesWritten)
+}
+
+func TestNewReader_CustomProcessorReturnsNil(t *testing.T) {
+	const lines = 1500
+	var sb strings.Builder
+	for i := 0; i < lines; i++ {
+		sb.WriteString("row")
+		sb.WriteByte(':')
+		sb.WriteString(strconv.Itoa(i))
+		sb.WriteByte('\n')
 	}
+	r := newReadCloser(sb.String())
+
+	// Custom processor that intentionally drops every line by
+	pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte, _ *LineDetails) ([]byte, error) {
+		return nil, nil // valid case: skip output for this line
+	}))
+
+	out, err := io.ReadAll(pr)
+	assert.NoError(t, err)
+	assert.Empty(t, out, "expected empty output when processor returns nil")
+
+	// Validate metrics: rows read should equal input line count; rows/bytes written should be zero
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(lines), metrics.RowsRead)
+	assert.Equal(t, int64(0), metrics.RowsWritten)
+	assert.Equal(t, int64(0), metrics.BytesWritten)
+	assert.Equal(t, lines, pr.RowsRead())
 }
 
 func TestNewReader_EmptyInput(t *testing.T) {
 	r := newReadCloser("")
 	pr := NewConcurrentLineProcessor(r)
 	out, err := io.ReadAll(pr)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(out) != 0 {
-		t.Errorf("expected empty output, got %q", string(out))
-	}
-	if pr.RowsRead() != 0 {
-		t.Errorf("expected 0 rows read, got %d", pr.RowsRead())
-	}
+	assert.NoError(t, err)
+	assert.Empty(t, out)
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(0), metrics.RowsRead)
+	assert.Equal(t, int64(0), metrics.RowsWritten)
+	assert.Equal(t, int64(0), metrics.BytesRead)
+	assert.Equal(t, int64(0), metrics.BytesWritten)
+	assert.Equal(t, 0, pr.RowsRead())
 }
 
 func TestNewReader_RowsReadLimit(t *testing.T) {
@@ -61,32 +95,30 @@ func TestNewReader_RowsReadLimit(t *testing.T) {
 	r := newReadCloser(input)
 	pr := NewConcurrentLineProcessor(r, WithRowsReadLimit(3))
 	out, err := io.ReadAll(pr)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	assert.NoError(t, err)
 	expected := "1\n2\n3\n"
-	if string(out) != expected {
-		t.Errorf("expected %q, got %q", expected, string(out))
-	}
-	if pr.RowsRead() != 3 {
-		t.Errorf("expected 3 rows read, got %d", pr.RowsRead())
-	}
+	assert.Equal(t, expected, string(out))
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(3), metrics.RowsRead)
+	assert.Equal(t, int64(3), metrics.RowsWritten)
+	assert.Equal(t, int64(len(out)), metrics.BytesWritten)
+	assert.Equal(t, 3, pr.RowsRead())
 }
 
 func TestNewReader_ErrorInCustomProcessor(t *testing.T) {
 	input := "x\ny\nz\n"
 	r := newReadCloser(input)
 	errMsg := "fail on y"
-	pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte) ([]byte, error) {
+	pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte, _ *LineDetails) ([]byte, error) {
 		if string(b) == "y" {
 			return nil, errors.New(errMsg)
 		}
 		return b, nil
 	}))
 	_, err := io.ReadAll(pr)
-	if err == nil || err.Error() != errMsg {
-		t.Errorf("expected error %q, got %v", errMsg, err)
-	}
+	assert.Error(t, err)
+	assert.Equal(t, errMsg, err.Error())
 }
 
 func TestNewReader_LargeInput(t *testing.T) {
@@ -94,18 +126,19 @@ func TestNewReader_LargeInput(t *testing.T) {
 	for i := 0; i < 10000; i++ {
 		sb.WriteString("row\n")
 	}
-	r := newReadCloser(sb.String())
+	input := sb.String()
+	r := newReadCloser(input)
 	pr := NewConcurrentLineProcessor(r)
 	out, err := io.ReadAll(pr)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(out) != sb.Len() {
-		t.Errorf("expected output len %d, got %d", sb.Len(), len(out))
-	}
-	if pr.RowsRead() != 10000 {
-		t.Errorf("expected 10000 rows read, got %d", pr.RowsRead())
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, len(input), len(out))
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(10000), metrics.RowsRead)
+	assert.Equal(t, int64(10000), metrics.RowsWritten)
+	assert.Equal(t, int64(len(input)), metrics.BytesRead)
+	assert.Equal(t, int64(len(out)), metrics.BytesWritten)
+	assert.Equal(t, 10000, pr.RowsRead())
 }
 
 func TestNewReader_AlwaysNewlineAtEnd(t *testing.T) {
@@ -113,12 +146,14 @@ func TestNewReader_AlwaysNewlineAtEnd(t *testing.T) {
 	r := newReadCloser(input)
 	pr := NewConcurrentLineProcessor(r)
 	out, err := io.ReadAll(pr)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(out) == 0 || out[len(out)-1] != '\n' {
-		t.Errorf("expected output to have trailing newline, got %q", string(out))
-	}
+	assert.NoError(t, err)
+	assert.NotEmpty(t, out)
+	assert.Equal(t, byte('\n'), out[len(out)-1], "expected output to have trailing newline")
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(3), metrics.RowsRead)
+	assert.Equal(t, int64(3), metrics.RowsWritten)
+	assert.Greater(t, metrics.BytesWritten, int64(0))
 }
 
 func TestNewReader_Concurrency(t *testing.T) {
@@ -126,15 +161,15 @@ func TestNewReader_Concurrency(t *testing.T) {
 	r := newReadCloser(input)
 	pr := NewConcurrentLineProcessor(r, WithWorkers(4))
 	out, err := io.ReadAll(pr)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if string(out) != input {
-		t.Errorf("expected %q, got %q", input, string(out))
-	}
-	if pr.RowsRead() != 10 {
-		t.Errorf("expected 10 rows read, got %d", pr.RowsRead())
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, input, string(out))
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(10), metrics.RowsRead)
+	assert.Equal(t, int64(10), metrics.RowsWritten)
+	assert.Equal(t, int64(len(input)), metrics.BytesRead)
+	assert.Equal(t, int64(len(out)), metrics.BytesWritten)
+	assert.Equal(t, 10, pr.RowsRead())
 }
 
 func TestNewReader_SmallChunkSize_OrderNotGuaranteed(t *testing.T) {
@@ -142,15 +177,12 @@ func TestNewReader_SmallChunkSize_OrderNotGuaranteed(t *testing.T) {
 	r := newReadCloser(input)
 	pr := NewConcurrentLineProcessor(r, WithChunkSize(2)) // very small chunk size
 	out, err := io.ReadAll(pr)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	assert.NoError(t, err)
 	// Split and compare as sets (ignoring order)
 	inputLines := strings.Split(strings.TrimSpace(input), "\n")
 	outputLines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(inputLines) != len(outputLines) {
-		t.Fatalf("expected %d lines, got %d", len(inputLines), len(outputLines))
-	}
+	assert.Equal(t, len(inputLines), len(outputLines))
+
 	lineCount := make(map[string]int)
 	for _, l := range inputLines {
 		lineCount[l]++
@@ -159,10 +191,14 @@ func TestNewReader_SmallChunkSize_OrderNotGuaranteed(t *testing.T) {
 		lineCount[l]--
 	}
 	for l, c := range lineCount {
-		if c != 0 {
-			t.Errorf("line %q count mismatch: %d", l, c)
-		}
+		assert.Equal(t, 0, c, "line %q count mismatch", l)
 	}
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(5), metrics.RowsRead)
+	assert.Equal(t, int64(5), metrics.RowsWritten)
+	assert.Equal(t, int64(len(input)), metrics.BytesRead)
+	assert.Greater(t, metrics.BytesWritten, int64(0))
 }
 
 func TestNewReader_MultipleReaders(t *testing.T) {
@@ -170,17 +206,14 @@ func TestNewReader_MultipleReaders(t *testing.T) {
 	r2 := newReadCloser("gamma\ndelta\n")
 	pr := NewConcurrentLineProcessor(nil, WithMultiReaders(r1, r2))
 	out, err := io.ReadAll(pr)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	assert.NoError(t, err)
+
 	content := strings.TrimRight(string(out), "\n")
-	if len(content) == 0 {
-		t.Fatalf("expected non-empty output, got %q", string(out))
-	}
+	assert.NotEmpty(t, content)
+
 	lines := strings.Split(content, "\n")
-	if len(lines) != 4 {
-		t.Fatalf("expected 4 lines, got %d", len(lines))
-	}
+	assert.Len(t, lines, 4)
+
 	lineCount := map[string]int{
 		"alpha": 1,
 		"beta":  1,
@@ -191,13 +224,15 @@ func TestNewReader_MultipleReaders(t *testing.T) {
 		lineCount[l]--
 	}
 	for l, c := range lineCount {
-		if c != 0 {
-			t.Errorf("line %q count mismatch: %d", l, c)
-		}
+		assert.Equal(t, 0, c, "line %q count mismatch", l)
 	}
-	if pr.RowsRead() != 4 {
-		t.Errorf("expected 4 rows read, got %d", pr.RowsRead())
-	}
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(4), metrics.RowsRead)
+	assert.Equal(t, int64(4), metrics.RowsWritten)
+	assert.Greater(t, metrics.BytesRead, int64(0))
+	assert.Greater(t, metrics.BytesWritten, int64(0))
+	assert.Equal(t, 4, pr.RowsRead())
 }
 
 func TestNewReader_MultipleReadersLargeInput(t *testing.T) {
@@ -215,35 +250,108 @@ func TestNewReader_MultipleReadersLargeInput(t *testing.T) {
 	pr := NewConcurrentLineProcessor(nil, WithMultiReaders(readers...), WithWorkers(4))
 	defer pr.Close()
 	out, err := io.ReadAll(pr)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	assert.NoError(t, err)
+
 	lines := strings.Split(string(out), "\n")
-	if len(lines) == 0 {
-		t.Fatal("expected output, got empty slice")
-	}
+	assert.NotEmpty(t, lines)
+
 	if lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	}
-	if len(lines) != readersCount*linesPerReader {
-		t.Fatalf("expected %d lines, got %d", readersCount*linesPerReader, len(lines))
-	}
+	assert.Equal(t, readersCount*linesPerReader, len(lines))
+
 	for _, line := range lines {
 		idx := strings.IndexByte(line, ':')
-		if idx == -1 {
-			t.Fatalf("unexpected line format: %q", line)
-		}
+		assert.NotEqual(t, -1, idx, "unexpected line format: %q", line)
 		prefix := line[:idx]
 		expectedCounts[prefix]--
 	}
 	for prefix, remaining := range expectedCounts {
-		if remaining != 0 {
-			t.Errorf("prefix %q count mismatch: %d", prefix, remaining)
+		assert.Equal(t, 0, remaining, "prefix %q count mismatch", prefix)
+	}
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(readersCount*linesPerReader), metrics.RowsRead)
+	assert.Equal(t, int64(readersCount*linesPerReader), metrics.RowsWritten)
+	assert.Greater(t, metrics.BytesRead, int64(0))
+	assert.Greater(t, metrics.BytesWritten, int64(0))
+	assert.Equal(t, readersCount*linesPerReader, pr.RowsRead())
+}
+
+func TestNewReader_WithContext(t *testing.T) {
+	t.Run("context timeout", func(t *testing.T) {
+		// Create a large input that takes time to process
+		const lines = 1000000
+		var sb strings.Builder
+		for i := 0; i < lines; i++ {
+			sb.WriteString("row:")
+			sb.WriteString(strconv.Itoa(i))
+			sb.WriteByte('\n')
 		}
-	}
-	if pr.RowsRead() != readersCount*linesPerReader {
-		t.Errorf("expected %d rows read, got %d", readersCount*linesPerReader, pr.RowsRead())
-	}
+
+		r := newReadCloser(sb.String())
+
+		// Create a context with very short timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Nanosecond)
+		defer cancel()
+
+		pr := NewConcurrentLineProcessor(r, WithContext(ctx), WithWorkers(4))
+		defer pr.Close()
+
+		// Try to read all - should fail due to context timeout
+		_, err := io.ReadAll(pr)
+		assert.Error(t, err)
+		if err != nil {
+			assert.Contains(t, err.Error(), "context deadline exceeded")
+		}
+	})
+
+	t.Run("context cancellation", func(t *testing.T) {
+		// Create a large input
+		const lines = 50000
+		var sb strings.Builder
+		for i := 0; i < lines; i++ {
+			sb.WriteString("row:")
+			sb.WriteString(strconv.Itoa(i))
+			sb.WriteByte('\n')
+		}
+
+		r := newReadCloser(sb.String())
+
+		// Create a cancellable context
+		ctx, cancel := context.WithCancel(context.Background())
+
+		pr := NewConcurrentLineProcessor(r, WithContext(ctx), WithWorkers(2))
+		defer pr.Close()
+
+		// Cancel immediately after starting
+		cancel()
+
+		// Try to read - should fail due to context cancellation
+		_, err := io.ReadAll(pr)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "context canceled")
+	})
+
+	t.Run("context with sufficient timeout succeeds", func(t *testing.T) {
+		// Test that context with sufficient timeout works fine
+		input := "line1\nline2\nline3\n"
+		r := newReadCloser(input)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		pr := NewConcurrentLineProcessor(r, WithContext(ctx))
+		defer pr.Close()
+
+		out, err := io.ReadAll(pr)
+		assert.NoError(t, err)
+		assert.Equal(t, input, string(out))
+
+		metrics := pr.Metrics()
+		assert.Equal(t, int64(3), metrics.RowsRead)
+		assert.Equal(t, int64(3), metrics.RowsWritten)
+	})
 }
 
 func newReadCloser(input string) io.ReadCloser {

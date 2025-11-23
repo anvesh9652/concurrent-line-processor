@@ -54,14 +54,19 @@ import (
 )
 
 var (
+	KB = 1024
 	// defaultChunkSize is the default size for reading chunks from the source (64KB).
 	// This provides a good balance between memory usage and performance for most use cases.
-	defaultChunkSize = 1024 * 64 // 64 KB
+	defaultChunkSize = 64 * KB
 
 	// defaultWorkers is the default number of goroutines used for processing chunks.
 	// It defaults to the number of CPU cores available.
 	defaultWorkers  = runtime.NumCPU()
 	defaultChanSize = 70
+
+	// maxLineLength defines the maximum length of a single line.
+	// Any line longer than this will not be accepted and will result in an error.
+	maxLineLength = 16 * KB
 )
 
 // NewConcurrentLineProcessor creates a new concurrentLineProcessor that reads from the provided io.ReadCloser.
@@ -91,7 +96,9 @@ var (
 //	}
 func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLineProcessor {
 	pr, pw := io.Pipe()
-	p := &concurrentLineProcessor{
+
+	p := WithOpts(&concurrentLineProcessor{
+		ctx:     context.Background(),
 		readers: []io.ReadCloser{r},
 
 		workers:       defaultWorkers,
@@ -100,16 +107,15 @@ func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLine
 		rowsReadLimit: -1,
 
 		pr: pr, pw: pw,
+		now: time.Now(),
 
-		customLineProcessor: func(b []byte) ([]byte, error) { return b, nil },
-	}
+		customLineProcessor: func(b []byte, _ *LineDetails) ([]byte, error) { return b, nil },
+	}, opts...)
 
-	WithOpts(p, opts...)
-
-	p.pool = sync.Pool{
+	p.lineDetailsPool = sync.Pool{New: func() any { return &LineDetails{} }}
+	p.chunkPool = sync.Pool{
 		New: func() any {
-			b := make([]byte, 0, p.chunkSize)
-			return &b
+			return &Chunk{data: make([]byte, p.chunkSize)}
 		},
 	}
 
@@ -128,8 +134,7 @@ func (p *concurrentLineProcessor) Read(b []byte) (int, error) {
 
 func (p *concurrentLineProcessor) Close() (retErr error) {
 	for _, r := range p.readers {
-		err := r.Close()
-		if err != nil {
+		if err := r.Close(); err != nil {
 			retErr = errors.Join(retErr, err)
 		}
 	}
@@ -143,11 +148,11 @@ func (p *concurrentLineProcessor) Close() (retErr error) {
 // and total processing time. The metrics are safe to access concurrently.
 func (p *concurrentLineProcessor) Metrics() Metrics {
 	return Metrics{
-		RowsRead:         atomic.LoadInt64(&p.metrics.RowsRead),
-		RowsWritten:      atomic.LoadInt64(&p.metrics.RowsWritten),
-		BytesRead:        atomic.LoadInt64(&p.metrics.BytesRead),
-		BytesTransformed: atomic.LoadInt64(&p.metrics.BytesTransformed),
-		TimeTook:         p.metrics.TimeTook, // It's safe to return --race flag isn't complaining
+		RowsRead:     atomic.LoadInt64(&p.metrics.RowsRead),
+		RowsWritten:  atomic.LoadInt64(&p.metrics.RowsWritten),
+		BytesRead:    atomic.LoadInt64(&p.metrics.BytesRead),
+		BytesWritten: atomic.LoadInt64(&p.metrics.BytesWritten),
+		TimeTook:     time.Since(p.now),
 	}
 }
 
@@ -160,98 +165,114 @@ func (p *concurrentLineProcessor) RowsRead() int {
 // Note: time took is only updated after the processing is complete.
 func (p *concurrentLineProcessor) Summary() string {
 	metrics := p.Metrics()
-	return "chunkSize=" + FormatBytes(p.chunkSize) +
-		", workers=" + strconv.Itoa(p.workers) +
-		", channelSize=" + strconv.Itoa(p.channelSize) +
-		", rowsReadLimit=" + strconv.Itoa(p.rowsReadLimit) +
-		", bytesRead=" + FormatBytes(int(metrics.BytesRead)) +
-		", bytesTransformed=" + FormatBytes(int(metrics.BytesTransformed)) +
-		", rowsRead=" + strconv.FormatInt(metrics.RowsRead, 10) +
-		", rowsWritten=" + strconv.FormatInt(metrics.RowsWritten, 10) +
-		", timeTook=" + metrics.TimeTook
+
+	var sec float64 = metrics.TimeTook.Seconds()
+	if sec == 0 {
+		sec = 1 // to avoid division by zero
+	}
+
+	return "chunkSize=" + FormatBytes(float64(p.chunkSize)) +
+		" workers=" + strconv.Itoa(p.workers) +
+		" channelSize=" + strconv.Itoa(p.channelSize) +
+		" rowsReadLimit=" + strconv.Itoa(p.rowsReadLimit) +
+		" bytesRead=" + FormatBytes(float64(metrics.BytesRead)) +
+		" bytesWritten=" + FormatBytes(float64(metrics.BytesWritten)) +
+		" rowsRead=" + strconv.FormatInt(metrics.RowsRead, 10) +
+		" rowsWritten=" + strconv.FormatInt(metrics.RowsWritten, 10) +
+		" throughput=" + FormatBytes(float64(metrics.BytesWritten)/sec) + "/s" +
+		" elapsed=" + FormatDuration(metrics.TimeTook)
 }
 
 func (p *concurrentLineProcessor) start() {
-	now := time.Now()
-	eg, ctx := errgroup.WithContext(context.Background())
+	eg, ctx := errgroup.WithContext(p.ctx)
 	eg.Go(func() error { return p.readAsChunks(ctx) })
 	eg.Go(func() error { return p.processChunks(ctx) })
 	eg.Go(func() error { return p.writeProcessedData(ctx) })
 
-	// go PrintSummaryPeriodically(p, now)
+	// go PrintSummaryPeriodically(ctx, p, 5*time.Second)
 
 	// Learning: if a goroutine returns an error, and the other goroutines are still running.
 	// we will not get any error on eg.Wait() if we don't use errgroup with context.
 	err := eg.Wait()
 	p.drainChannelData()
-	p.metrics.TimeTook = time.Since(now).String()
+	// we never know when user calls .Metrics(). So we have to update the actual time took here.
+	p.metrics.TimeTook = time.Since(p.now)
 	p.pw.CloseWithError(err)
 }
 
 func (p *concurrentLineProcessor) readAsChunks(ctx context.Context) error {
-	eg, ctx := errgroup.WithContext(ctx)
-
 	defer close(p.inStream)
 
-	for _, r := range p.readers {
+	eg, ctx := errgroup.WithContext(ctx)
+	for i, r := range p.readers {
 		if r == nil {
 			continue
 		}
 		eg.Go(func() error {
-			var (
-				leftOver = p.pool.Get().(*[]byte)
-				buff     = make([]byte, p.chunkSize)
-				chunkID  = 1
-
-				copyToSend *[]byte
-			)
-
-			defer p.putBuffToPool(leftOver)
-
-			for {
-				rr := p.RowsRead()
-				if p.rowsReadLimit != -1 && rr >= p.rowsReadLimit { // If rowsReadLimit is set, check if it has been reached
-					break
-				}
-
-				copyToSend = p.pool.Get().(*[]byte)
-				read, err := r.Read(buff)
-				if err != nil {
-					if errors.Is(err, io.EOF) {
-						if len(*leftOver) != 0 {
-							*copyToSend = append(*copyToSend, *leftOver...)
-							if err := sendToStream(ctx, p.inStream, &Chunk{id: chunkID, data: copyToSend}); err != nil {
-								return err
-							}
-						}
-						break
-					}
-					return err
-				}
-
-				currBuff, linesToUpdate := trimmedBuff(buff[:read], p.rowsReadLimit, rr)
-				atomic.AddInt64(&p.metrics.RowsRead, int64(linesToUpdate))
-				atomic.AddInt64(&p.metrics.BytesRead, int64(len(currBuff)))
-
-				ind := bytes.LastIndex(currBuff, []byte{'\n'})
-				if ind == -1 {
-					*leftOver = append(*leftOver, buff[:read]...)
-					continue
-				}
-
-				*leftOver = append(*leftOver, currBuff[:ind]...)
-				*copyToSend = append(*copyToSend, *leftOver...)
-				if err := sendToStream(ctx, p.inStream, &Chunk{id: chunkID, data: copyToSend}); err != nil {
-					return err
-				}
-
-				*leftOver = append((*leftOver)[:0], currBuff[ind+1:]...)
-				chunkID++
-			}
-			return nil
+			return p.handleReader(ctx, i, r)
 		})
 	}
 	return eg.Wait()
+}
+
+func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int, r io.ReadCloser) error {
+	var (
+		chunkID, linesToUpdate, rr int
+
+		leftOver = make([]byte, 0, maxLineLength)
+		currBuff = p.newChunkFromPool(-1, -1) // temporary buffer for reading
+	)
+	defer p.putChunkToPool(currBuff)
+
+	for {
+		if rr = p.RowsRead(); p.rowsReadLimit != -1 && rr >= p.rowsReadLimit { // If rowsReadLimit is set, check if it has been reached
+			break
+		}
+
+		chunk := p.newChunkFromPool(chunkID, readerID)
+		copied := moveAllData(chunk, 0, leftOver)
+
+		read, readErr := r.Read(currBuff.data)
+		if readErr != nil {
+			if !errors.Is(readErr, io.EOF) {
+				return readErr
+			}
+
+			var err error
+			if copied > 0 {
+				atomic.AddInt64(&p.metrics.RowsRead, 1) // if we are here then it's the last line without "\n" at end
+				err = sendToStream(ctx, p.inStream, chunk)
+			}
+			return err
+		}
+
+		moveAllData(chunk, copied, currBuff.data[:read])
+		chunk.endingPos, linesToUpdate = trimmedBuff(chunk.data[:chunk.endingPos], p.rowsReadLimit, rr)
+		atomic.AddInt64(&p.metrics.RowsRead, int64(linesToUpdate))
+		atomic.AddInt64(&p.metrics.BytesRead, int64(read))
+
+		ind := bytes.LastIndex(chunk.data[:chunk.endingPos], []byte{'\n'})
+		if ind == -1 {
+			if chunk.endingPos > maxLineLength {
+				return errors.New("line length exceeds maximum allowed length of " + strconv.Itoa(maxLineLength) + " bytes")
+			}
+			leftOver = append(leftOver[:0], chunk.data[:chunk.endingPos]...)
+			continue
+		}
+
+		if chunk.endingPos-ind > maxLineLength {
+			return errors.New("line length exceeds maximum allowed length of " + strconv.Itoa(maxLineLength) + " bytes")
+		}
+
+		leftOver = append(leftOver[:0], chunk.data[ind+1:chunk.endingPos]...)
+		chunk.endingPos = ind + 1
+		if err := sendToStream(ctx, p.inStream, chunk); err != nil {
+			return err
+		}
+
+		chunkID++
+	}
+	return nil
 }
 
 func (p *concurrentLineProcessor) processChunks(ctx context.Context) error {
@@ -274,22 +295,26 @@ func (p *concurrentLineProcessor) processChunks(ctx context.Context) error {
 }
 
 func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk *Chunk) error {
-	var (
-		lineStart = 0
-
-		buff = p.pool.Get().(*[]byte)
-		data = *chunk.data
-	)
-	// put the original chunk data back to the pool
-	defer p.putBuffToPool(chunk.data)
-
 	if !p.hasCustomLineProcessor {
-		*buff = append(*buff, data...)
-		AppendNewLine(buff)
-		return sendToStream(ctx, p.outStream, &Chunk{id: chunk.id, data: buff})
+		EnsureNewLineAtEnd(chunk)
+		chunk.rowsWritten += int64(bytes.Count(chunk.data[:chunk.endingPos], []byte("\n")))
+		return sendToStream(ctx, p.outStream, chunk)
 	}
 
-	var ind, lineEnd int
+	var (
+		lineDetails = p.lineDetailsPool.Get().(*LineDetails)
+		data        = chunk.data[:chunk.endingPos]
+
+		lineStart, ind, lineEnd int
+	)
+
+	// put the original chunk data back to the pool
+	defer p.putChunkToPool(chunk)
+	defer p.lineDetailsPool.Put(lineDetails)
+
+	lineDetails.ChunkID, lineDetails.ReaderID = chunk.id, chunk.readerID
+	resChunk := p.newChunkFromPool(chunk.id, chunk.readerID)
+
 	for lineStart < len(data) {
 		ind = bytes.IndexByte(data[lineStart:], '\n')
 		lineEnd = lineStart + ind // the ind is relative to buff passed to IndexByte
@@ -297,19 +322,23 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 			lineEnd = len(data)
 		}
 
-		pb, err := p.customLineProcessor(data[lineStart:lineEnd])
+		pb, err := p.customLineProcessor(data[lineStart:lineEnd], lineDetails)
 		if err != nil {
-			p.putBuffToPool(buff)
+			p.putChunkToPool(resChunk)
 			return err
 		}
-		// Learning: writing each line to the output stream one by one drastically worse the performance
-		// due to the number of system calls. It is better to write the whole chunk at once to the output stream
-		*buff = append(*buff, pb...)
-		AppendNewLine(buff)
+
+		moveAllData(resChunk, resChunk.endingPos, pb)
+		EnsureNewLineAtEnd(resChunk)
+
 		lineStart = lineEnd + 1
 	}
 
-	return sendToStream(ctx, p.outStream, &Chunk{id: chunk.id, data: buff})
+	// Learning: writing each line to the output stream one by one drastically worse the performance
+	// due to the channels getting blocked for after few single line writes
+	// It is better to write the whole chunk at once to the output stream
+	resChunk.rowsWritten += int64(bytes.Count(resChunk.data[:resChunk.endingPos], []byte("\n")))
+	return sendToStream(ctx, p.outStream, resChunk)
 }
 
 func (p *concurrentLineProcessor) writeProcessedData(ctx context.Context) error {
@@ -320,18 +349,18 @@ func (p *concurrentLineProcessor) writeProcessedData(ctx context.Context) error 
 		}
 
 		// Inline function to safely put bufferes back into the pool after writing
-		write := func(buff *[]byte) error {
-			defer p.putBuffToPool(buff)
-			n, err := p.pw.Write(*buff)
+		write := func(chunk *Chunk) error {
+			defer p.putChunkToPool(chunk)
+			n, err := p.pw.Write(chunk.data[:chunk.endingPos])
 			if err != nil {
 				return err
 			}
 
-			atomic.AddInt64(&p.metrics.BytesTransformed, int64(n))
-			atomic.AddInt64(&p.metrics.RowsWritten, int64(bytes.Count(*buff, []byte{'\n'})))
+			atomic.AddInt64(&p.metrics.BytesWritten, int64(n))
+			atomic.AddInt64(&p.metrics.RowsWritten, chunk.rowsWritten)
 			return nil
 		}
-		if err := write(chunk.data); err != nil {
+		if err := write(chunk); err != nil {
 			return err
 		}
 	}
@@ -340,52 +369,53 @@ func (p *concurrentLineProcessor) writeProcessedData(ctx context.Context) error 
 // drainChannelData drains the input and output channels to ensure no data is leaking after any errors
 func (p *concurrentLineProcessor) drainChannelData() {
 	for chunk := range p.inStream {
-		p.putBuffToPool(chunk.data)
+		p.chunkPool.Put(chunk)
 	}
 	for chunk := range p.outStream {
-		p.putBuffToPool(chunk.data)
+		p.chunkPool.Put(chunk)
 	}
 }
 
-func (p *concurrentLineProcessor) putBuffToPool(buff *[]byte) {
-	if buff == nil {
+func (p *concurrentLineProcessor) putChunkToPool(chunk *Chunk) {
+	if chunk == nil {
 		return
 	}
-	// Reset the buffer to avoid any data curruption
-	*buff = (*buff)[:0]
-	p.pool.Put(buff)
+	p.chunkPool.Put(chunk)
 }
 
-func getFromStream(ctx context.Context, s chan *Chunk) (*Chunk, error) {
+func getFromStream(ctx context.Context, ch chan *Chunk) (*Chunk, error) {
 	select {
-	case chunk := <-s:
+	case chunk := <-ch:
 		return chunk, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 }
 
-func sendToStream(ctx context.Context, s chan *Chunk, c *Chunk) error {
+func sendToStream(ctx context.Context, ch chan *Chunk, chunk *Chunk) error {
+	if chunk == nil || chunk.endingPos == 0 {
+		return nil
+	}
 	select {
-	case s <- c:
+	case ch <- chunk:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 	return nil
 }
 
-func trimmedBuff(buff []byte, readLimit, currLinesRead int) ([]byte, int) {
+func trimmedBuff(buff []byte, readLimit, currLinesRead int) (int, int) {
 	newLinesCnt := bytes.Count(buff, []byte{'\n'})
 	linesNeeded := newLinesCnt
 	if readLimit != -1 {
 		linesNeeded = readLimit - currLinesRead
 	}
 	if linesNeeded >= newLinesCnt {
-		return buff, newLinesCnt
+		return len(buff), newLinesCnt
 	}
 
 	if linesNeeded <= 0 {
-		return buff[:0], 0
+		return 0, 0
 	}
 
 	searchArea := buff
@@ -399,10 +429,27 @@ func trimmedBuff(buff []byte, readLimit, currLinesRead int) ([]byte, int) {
 		buffLen += ind + 1
 		if linesFound >= linesNeeded {
 			// the buff includes new line at the end
-			return buff[:buffLen], linesFound
+			return buffLen, linesFound
 		}
 		searchArea = searchArea[ind+1:]
 	}
 	// If not enough newlines were found, the whole buffer is used.
-	return buff, linesFound
+	return len(buff), linesFound
+}
+
+func (p *concurrentLineProcessor) newChunkFromPool(chunkID, readerID int) *Chunk {
+	chunk := p.chunkPool.Get().(*Chunk)
+	// Reslicing prevents the reuse of larger buffers (in ⁠.Read) that were created by appends.
+	// When a grown buffer is returned to the pool, appending makes it even larger.
+	chunk.data = chunk.data[:p.chunkSize]
+	chunk.id, chunk.readerID, chunk.endingPos, chunk.rowsWritten = chunkID, readerID, 0, 0
+	return chunk
+}
+
+func moveAllData(chunk *Chunk, start int, src []byte) int {
+	if copied := copy(chunk.data[start:], src); copied < len(src) {
+		chunk.data = append(chunk.data, src[copied:]...) // append the remaining bytes
+	}
+	chunk.endingPos += len(src)
+	return len(src)
 }

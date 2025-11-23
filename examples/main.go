@@ -21,13 +21,13 @@ func start() {
 	withTiming(func() {
 		// GetAllKeys(r, -1)
 		// InitConvertCtoJ(r)
-		// InitConvertJtoC(clp.Files[1])
-		MultiReaders(clp.Files)
+		InitConvertJtoC(clp.Files[3])
+		// MultiReaders(clp.Files)
 	})
 }
 
 func withTiming(f func()) {
 	now := time.Now()
 	f()
-	fmt.Println("Total time took:", time.Since(now))
+	fmt.Println("Total time took:", clp.FormatDuration(time.Since(now)))
 }

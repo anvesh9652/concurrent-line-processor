@@ -4,15 +4,17 @@
 package concurrentlineprocessor
 
 import (
+	"context"
 	"io"
 )
 
 // WithOpts applies the given options to the concurrentLineProcessor.
 // This is a convenience function for applying multiple options at once.
-func WithOpts(p *concurrentLineProcessor, opts ...Option) {
+func WithOpts(p *concurrentLineProcessor, opts ...Option) *concurrentLineProcessor {
 	for _, opt := range opts {
 		opt(p)
 	}
+	return p
 }
 
 // WithChunkSize sets the chunk size for reading data from the source.
@@ -91,6 +93,7 @@ func WithChannelSize(size int) Option {
 
 // WithMultiReaders sets multiple source readers for the concurrentLineProcessor.
 // When used, the reader passed to NewConcurrentLineProcessor can be nil because this option replaces the internal reader list.
+// Empty readers will by handled by Read method.
 //
 // Example:
 //
@@ -98,6 +101,20 @@ func WithChannelSize(size int) Option {
 //	clp.NewConcurrentLineProcessor(nil, clp.WithMultiReaders(readers...))
 func WithMultiReaders(readers ...io.ReadCloser) Option {
 	return func(pr *concurrentLineProcessor) {
-		pr.readers = Filter(readers, func(r io.ReadCloser) bool { return r != nil })
+		pr.readers = readers
+	}
+}
+
+// WithContext sets the context for the concurrentLineProcessor.
+// This context can be used to manage cancellation and timeouts for the processing operations.
+//
+// Example:
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+//	defer cancel()
+//	clp.NewConcurrentLineProcessor(reader, clp.WithContext(ctx))
+func WithContext(ctx context.Context) Option {
+	return func(pr *concurrentLineProcessor) {
+		pr.ctx = ctx
 	}
 }
