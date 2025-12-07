@@ -15,6 +15,11 @@ import (
 	"time"
 )
 
+const (
+	BaseSI     = 1000
+	BaseBinary = 1024
+)
+
 // Files contains a list of test files used for development and testing.
 // This variable is used internally for testing and benchmarking purposes.
 var Files = []string{
@@ -62,19 +67,22 @@ func PrintAsJsonString(v any) {
 	fmt.Println(string(b))
 }
 
-func FormatBytes(size float64) string {
-	formatValue := func(v float64, unit string) string {
-		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.2f", v), "0"), ".") + unit
+func FormatBytes(size, base float64) string {
+	formatValue := func(v float64, unit string, base float64) string {
+		if base == BaseBinary {
+			unit = unit + "i"
+		}
+		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.2f", v), "0"), ".") + unit + "B"
 	}
 
-	if size < 1024 {
+	if size < base {
 		return fmt.Sprintf("%.fB", size)
-	} else if size < math.Pow(1024, 2) {
-		return formatValue(size/1024, "KB")
-	} else if size < math.Pow(1024, 3) {
-		return formatValue(size/math.Pow(1024, 2), "MB")
+	} else if size < math.Pow(base, 2) {
+		return formatValue(size/base, "K", base)
+	} else if size < math.Pow(base, 3) {
+		return formatValue(size/math.Pow(base, 2), "M", base)
 	}
-	return formatValue(size/math.Pow(1024, 3), "GB")
+	return formatValue(size/math.Pow(base, 3), "G", base)
 }
 
 func FormatDuration(d time.Duration) string {

@@ -67,6 +67,8 @@ var (
 	// maxLineLength defines the maximum length of a single line.
 	// Any line longer than this will not be accepted and will result in an error.
 	maxLineLength = 16 * KB
+
+	once sync.Once
 )
 
 // NewConcurrentLineProcessor creates a new concurrentLineProcessor that reads from the provided io.ReadCloser.
@@ -122,13 +124,15 @@ func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLine
 	p.inStream = make(chan *Chunk, p.channelSize)
 	p.outStream = make(chan *Chunk, p.channelSize)
 
-	go func() { p.start() }()
 	return p
 }
 
 // Read implements io.Reader interface, allowing the processed data to be read
 // using standard Go I/O patterns like io.Copy, io.ReadAll, bufio.Scanner, etc.
 func (p *concurrentLineProcessor) Read(b []byte) (int, error) {
+	once.Do(func() {
+		go func() { p.start() }()
+	})
 	return p.pr.Read(b)
 }
 
@@ -171,15 +175,15 @@ func (p *concurrentLineProcessor) Summary() string {
 		sec = 1 // to avoid division by zero
 	}
 
-	return "chunkSize=" + FormatBytes(float64(p.chunkSize)) +
+	return "chunkSize=" + FormatBytes(float64(p.chunkSize), BaseBinary) +
 		" workers=" + strconv.Itoa(p.workers) +
 		" channelSize=" + strconv.Itoa(p.channelSize) +
 		" rowsReadLimit=" + strconv.Itoa(p.rowsReadLimit) +
-		" bytesRead=" + FormatBytes(float64(metrics.BytesRead)) +
-		" bytesWritten=" + FormatBytes(float64(metrics.BytesWritten)) +
+		" bytesRead=" + FormatBytes(float64(metrics.BytesRead), BaseSI) +
+		" bytesWritten=" + FormatBytes(float64(metrics.BytesWritten), BaseSI) +
 		" rowsRead=" + strconv.FormatInt(metrics.RowsRead, 10) +
 		" rowsWritten=" + strconv.FormatInt(metrics.RowsWritten, 10) +
-		" throughput=" + FormatBytes(float64(metrics.BytesWritten)/sec) + "/s" +
+		" throughput=" + FormatBytes(float64(metrics.BytesWritten)/sec, BaseSI) + "/s" +
 		" elapsed=" + FormatDuration(metrics.TimeTook)
 }
 
@@ -230,7 +234,7 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 		}
 
 		chunk := p.newChunkFromPool(chunkID, readerID)
-		copied := moveAllData(chunk, 0, leftOver)
+		_, _ = chunk.Write(leftOver)
 
 		read, readErr := r.Read(currBuff.data)
 		if readErr != nil {
@@ -239,14 +243,14 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 			}
 
 			var err error
-			if copied > 0 {
+			if chunk.endingPos > 0 {
 				atomic.AddInt64(&p.metrics.RowsRead, 1) // if we are here then it's the last line without "\n" at end
 				err = sendToStream(ctx, p.inStream, chunk)
 			}
 			return err
 		}
 
-		moveAllData(chunk, copied, currBuff.data[:read])
+		_, _ = chunk.Write(currBuff.data[:read])
 		chunk.endingPos, linesToUpdate = trimmedBuff(chunk.data[:chunk.endingPos], p.rowsReadLimit, rr)
 		atomic.AddInt64(&p.metrics.RowsRead, int64(linesToUpdate))
 		atomic.AddInt64(&p.metrics.BytesRead, int64(read))
@@ -328,7 +332,7 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 			return err
 		}
 
-		moveAllData(resChunk, resChunk.endingPos, pb)
+		_, _ = resChunk.Write(pb)
 		EnsureNewLineAtEnd(resChunk)
 
 		lineStart = lineEnd + 1
@@ -444,12 +448,4 @@ func (p *concurrentLineProcessor) newChunkFromPool(chunkID, readerID int) *Chunk
 	chunk.data = chunk.data[:p.chunkSize]
 	chunk.id, chunk.readerID, chunk.endingPos, chunk.rowsWritten = chunkID, readerID, 0, 0
 	return chunk
-}
-
-func moveAllData(chunk *Chunk, start int, src []byte) int {
-	if copied := copy(chunk.data[start:], src); copied < len(src) {
-		chunk.data = append(chunk.data, src[copied:]...) // append the remaining bytes
-	}
-	chunk.endingPos += len(src)
-	return len(src)
 }

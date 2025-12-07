@@ -102,3 +102,13 @@ type concurrentLineProcessor struct {
 	// If true, the processor will use the customLineProcessor to process each line.
 	hasCustomLineProcessor bool
 }
+
+// Implementation of io.Writer interface for any future use.
+func (chunk *Chunk) Write(src []byte) (int, error) {
+	start := chunk.endingPos
+	if copied := copy(chunk.data[start:], src); copied < len(src) {
+		chunk.data = append(chunk.data, src[copied:]...) // append the remaining bytes
+	}
+	chunk.endingPos += len(src)
+	return len(src), nil
+}

@@ -12,6 +12,7 @@ import (
 )
 
 func MultiReaders(files []string) {
+	var err error
 	var x []io.ReadCloser
 
 	// 1015862593 rows(1.01B) & 35GB worth of data
@@ -26,13 +27,19 @@ func MultiReaders(files []string) {
 		return b, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 
 	pr := clp.NewConcurrentLineProcessor(nil, clp.WithMultiReaders(x...), clp.WithCustomLineProcessor(lp), clp.WithContext(ctx))
 	defer pr.Close()
 
-	_, err := io.Copy(io.Discard, pr)
+	w := io.Discard
+	// w, err = os.Create("./tmp/multi_reader_output.txt")
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+
+	_, err = io.Copy(w, pr)
 	if err != nil {
 		log.Fatal(err)
 	}
