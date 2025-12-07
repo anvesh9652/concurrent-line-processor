@@ -98,7 +98,7 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 		return err
 	}
 
-	customProcessor := func(b []byte, _ *clp.LineDetails, w io.Writer) error{
+	customProcessor := func(b []byte, _ *clp.LineDetails, w io.Writer) error {
 		// return handleLineNormalWay(b, columns, w)
 		return hanldeLineWithParser(b, columns, w)
 	}
