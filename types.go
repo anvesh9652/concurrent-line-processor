@@ -18,7 +18,7 @@ type (
 	// LineProcessor is a function type for processing individual lines.
 	// It receives a line as []byte and info and then returns the processed line and any error.
 	// Implementations must be thread-safe as they may be called concurrently.
-	LineProcessor func(b []byte, info *LineDetails) ([]byte, error)
+	LineProcessor func(b []byte, info *LineDetails, out io.Writer) error
 )
 
 // Chunk represents a piece of data to be processed, containing an ID for ordering

@@ -42,17 +42,18 @@ func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 		mu   sync.Mutex
 		keys = make(map[string]struct{})
 	)
-	customProcessor := func(b []byte, _ *clp.LineDetails) ([]byte, error) {
+	customProcessor := func(b []byte, _ *clp.LineDetails, w io.Writer) error {
 		var d map[string]any
 		if err := json.Unmarshal(b, &d); err != nil {
-			return nil, err
+			return err
 		}
 		mu.Lock()
 		for k := range d {
 			keys[k] = struct{}{}
 		}
 		mu.Unlock()
-		return b, nil
+		_, err := w.Write(b)
+		return err
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
@@ -72,23 +73,9 @@ func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 
 // These functions can be reusalbe outside of this package
 func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
-	// pool of reusable buffers; keep them small initially, grow as needed
-	buffPool := sync.Pool{
-		New: func() any { return &bytes.Buffer{} },
-	}
-
-	customProcessor := func(b []byte, _ *clp.LineDetails) ([]byte, error) {
-		buff := buffPool.Get().(*bytes.Buffer)
-		buff.Reset()
-
+	customProcessor := func(b []byte, _ *clp.LineDetails, w io.Writer) error {
 		// if err := handleLineNormalWay(b, columns, buff); err != nil {
-		if err := hanldeLineWithParser(b, columns, buff); err != nil {
-			return nil, err
-		}
-
-		out := append([]byte(nil), buff.Bytes()...) // copy to avoid data race when buff reused before consumer copies
-		buffPool.Put(buff)
-		return out, nil
+		return hanldeLineWithParser(b, columns, w)
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
@@ -106,27 +93,14 @@ func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
 }
 
 func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
-	// pool of reusable buffers; keep them small initially, grow as needed
-	buffPool := sync.Pool{
-		New: func() any { return &bytes.Buffer{} },
-	}
-
 	columns, readers, err := getColumnsAndReaders(r)
 	if err != nil {
 		return err
 	}
 
-	customProcessor := func(b []byte, _ *clp.LineDetails) ([]byte, error) {
-		buff := buffPool.Get().(*bytes.Buffer)
-		buff.Reset()
-
-		// if err := handleLineNormalWay(b, columns, buff); err != nil {
-		if err := hanldeLineWithParser(b, columns, buff); err != nil {
-			return nil, err
-		}
-		out := append([]byte(nil), buff.Bytes()...) // copy to avoid data race when buff reused before consumer copies
-		buffPool.Put(buff)
-		return out, nil
+	customProcessor := func(b []byte, _ *clp.LineDetails, w io.Writer) error{
+		// return handleLineNormalWay(b, columns, w)
+		return hanldeLineWithParser(b, columns, w)
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
@@ -214,7 +188,7 @@ func ConvertAnyToString(v any) string {
 	}
 }
 
-func handleLineNormalWay(b []byte, cols []string, w *bytes.Buffer) error {
+func handleLineNormalWay(b []byte, cols []string, w io.Writer) error {
 	var d map[string]any
 	if err := json.Unmarshal(b, &d); err != nil {
 		return err
@@ -222,14 +196,14 @@ func handleLineNormalWay(b []byte, cols []string, w *bytes.Buffer) error {
 	// build CSV row manually
 	for i, col := range cols {
 		if i > 0 {
-			w.WriteByte(',')
+			w.Write([]byte(","))
 		}
 		escapeFieldByte([]byte(ConvertAnyToString(d[col])), w)
 	}
 	return nil
 }
 
-func hanldeLineWithParser(line []byte, cols []string, w *bytes.Buffer) error {
+func hanldeLineWithParser(line []byte, cols []string, w io.Writer) error {
 	parser := parserPool.Get()
 	defer parserPool.Put(parser)
 	v, err := parser.ParseBytes(line)
@@ -238,7 +212,7 @@ func hanldeLineWithParser(line []byte, cols []string, w *bytes.Buffer) error {
 	}
 	for i, col := range cols {
 		if i > 0 {
-			w.WriteByte(',')
+			w.Write([]byte(","))
 		}
 		escapeFieldByte(v.Get(col).MarshalTo(nil), w)
 		// escapeFieldByte([]byte(v.Get(col).String()), w)
@@ -246,13 +220,13 @@ func hanldeLineWithParser(line []byte, cols []string, w *bytes.Buffer) error {
 	return nil
 }
 
-func escapeFieldByte(field []byte, dst *bytes.Buffer) {
-	dst.WriteByte('"')
+func escapeFieldByte(field []byte, dst io.Writer) {
+	dst.Write([]byte{'"'})
 	for _, c := range field {
 		if c == '"' { // escape quotes by doubling
-			dst.WriteByte('"')
+			dst.Write([]byte{'"'})
 		}
-		dst.WriteByte(c)
+		dst.Write([]byte{c})
 	}
-	dst.WriteByte('"')
+	dst.Write([]byte{'"'})
 }

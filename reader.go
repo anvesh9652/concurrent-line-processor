@@ -67,8 +67,6 @@ var (
 	// maxLineLength defines the maximum length of a single line.
 	// Any line longer than this will not be accepted and will result in an error.
 	maxLineLength = 16 * KB
-
-	once sync.Once
 )
 
 // NewConcurrentLineProcessor creates a new concurrentLineProcessor that reads from the provided io.ReadCloser.
@@ -111,7 +109,10 @@ func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLine
 		pr: pr, pw: pw,
 		now: time.Now(),
 
-		customLineProcessor: func(b []byte, _ *LineDetails) ([]byte, error) { return b, nil },
+		customLineProcessor: func(b []byte, _ *LineDetails, w io.Writer) error {
+			_, err := w.Write(b)
+			return err
+		},
 	}, opts...)
 
 	p.lineDetailsPool = sync.Pool{New: func() any { return &LineDetails{} }}
@@ -124,15 +125,13 @@ func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLine
 	p.inStream = make(chan *Chunk, p.channelSize)
 	p.outStream = make(chan *Chunk, p.channelSize)
 
+	go p.start()
 	return p
 }
 
 // Read implements io.Reader interface, allowing the processed data to be read
 // using standard Go I/O patterns like io.Copy, io.ReadAll, bufio.Scanner, etc.
 func (p *concurrentLineProcessor) Read(b []byte) (int, error) {
-	once.Do(func() {
-		go func() { p.start() }()
-	})
 	return p.pr.Read(b)
 }
 
@@ -326,15 +325,12 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 			lineEnd = len(data)
 		}
 
-		pb, err := p.customLineProcessor(data[lineStart:lineEnd], lineDetails)
-		if err != nil {
+		if err := p.customLineProcessor(data[lineStart:lineEnd], lineDetails, resChunk); err != nil {
 			p.putChunkToPool(resChunk)
 			return err
 		}
 
-		_, _ = resChunk.Write(pb)
 		EnsureNewLineAtEnd(resChunk)
-
 		lineStart = lineEnd + 1
 	}
 

@@ -32,8 +32,9 @@ func TestNewReader_ReadsAllLines(t *testing.T) {
 func TestNewReader_CustomLineProcessor(t *testing.T) {
 	input := "a\nb\nc\n"
 	r := newReadCloser(input)
-	pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte, _ *LineDetails) ([]byte, error) {
-		return bytes.ToUpper(b), nil
+	pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte, _ *LineDetails, w io.Writer) error {
+		_, err := w.Write(bytes.ToUpper(b))
+		return err
 	}))
 	out, err := io.ReadAll(pr)
 	assert.NoError(t, err)
@@ -59,8 +60,8 @@ func TestNewReader_CustomProcessorReturnsNil(t *testing.T) {
 	r := newReadCloser(sb.String())
 
 	// Custom processor that intentionally drops every line by
-	pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte, _ *LineDetails) ([]byte, error) {
-		return nil, nil // valid case: skip output for this line
+	pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte, _ *LineDetails, w io.Writer) error {
+		return nil // valid case: skip output for this line
 	}))
 
 	out, err := io.ReadAll(pr)
@@ -110,11 +111,12 @@ func TestNewReader_ErrorInCustomProcessor(t *testing.T) {
 	input := "x\ny\nz\n"
 	r := newReadCloser(input)
 	errMsg := "fail on y"
-	pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte, _ *LineDetails) ([]byte, error) {
+	pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte, _ *LineDetails, w io.Writer) error {
 		if string(b) == "y" {
-			return nil, errors.New(errMsg)
+			return errors.New(errMsg)
 		}
-		return b, nil
+		_, err := w.Write(b)
+		return err
 	}))
 	_, err := io.ReadAll(pr)
 	assert.Error(t, err)

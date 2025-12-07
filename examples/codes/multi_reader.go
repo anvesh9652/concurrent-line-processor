@@ -23,8 +23,9 @@ func MultiReaders(files []string) {
 		}
 		x = append(x, f)
 	}
-	lp := func(b []byte, _ *clp.LineDetails) ([]byte, error) {
-		return b, nil
+	lp := func(b []byte, _ *clp.LineDetails, w io.Writer) error {
+		_, err := w.Write(b)
+		return err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
