@@ -19,6 +19,7 @@ func MultiReaders(files []string) {
 	for _, file := range files {
 		f, err := os.Open(file)
 		if err != nil {
+			fmt.Println("err:", err)
 			continue
 		}
 		x = append(x, f)

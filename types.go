@@ -112,3 +112,14 @@ func (chunk *Chunk) Write(src []byte) (int, error) {
 	chunk.endingPos += len(src)
 	return len(src), nil
 }
+
+func (chunk *Chunk) WriteByte(b byte) error {
+	if chunk.endingPos < len(chunk.data) {
+		chunk.data[chunk.endingPos] = b
+		chunk.endingPos++
+		return nil
+	}
+	chunk.data = append(chunk.data, b)
+	chunk.endingPos++
+	return nil
+}

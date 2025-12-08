@@ -74,8 +74,8 @@ func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 // These functions can be reusalbe outside of this package
 func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
 	customProcessor := func(b []byte, _ *clp.LineDetails, w io.Writer) error {
-		// if err := handleLineNormalWay(b, columns, buff); err != nil {
-		return hanldeLineWithParser(b, columns, w)
+		// return handleLineNormalWay(b, columns, w.(io.ByteWriter))
+		return hanldeLineWithParser(b, columns, w.(io.ByteWriter))
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
@@ -99,8 +99,8 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 	}
 
 	customProcessor := func(b []byte, _ *clp.LineDetails, w io.Writer) error {
-		// return handleLineNormalWay(b, columns, w)
-		return hanldeLineWithParser(b, columns, w)
+		// return handleLineNormalWay(b, columns, w.(io.ByteWriter))
+		return hanldeLineWithParser(b, columns, w.(io.ByteWriter))
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
@@ -188,7 +188,7 @@ func ConvertAnyToString(v any) string {
 	}
 }
 
-func handleLineNormalWay(b []byte, cols []string, w io.Writer) error {
+func handleLineNormalWay(b []byte, cols []string, w io.ByteWriter) error {
 	var d map[string]any
 	if err := json.Unmarshal(b, &d); err != nil {
 		return err
@@ -196,14 +196,20 @@ func handleLineNormalWay(b []byte, cols []string, w io.Writer) error {
 	// build CSV row manually
 	for i, col := range cols {
 		if i > 0 {
-			w.Write([]byte(","))
+			w.WriteByte(',')
 		}
 		escapeFieldByte([]byte(ConvertAnyToString(d[col])), w)
 	}
 	return nil
 }
 
-func hanldeLineWithParser(line []byte, cols []string, w io.Writer) error {
+// Learning: Writing a single-byte slice (e.g., Write([]byte{','})) to an io.Writer is significantly slower
+// than using io.ByteWriter.WriteByte.
+// Reasons:
+// 1. Slice Allocation: Creating []byte{','} allocates a new slice header (and potentially backing array) every time.
+// 2. Generic Overhead: Write() handles arbitrary lengths, involving bounds checks and copy() logic, which is overkill for 1 byte.
+// 3. Compiler Optimization: WriteByte is often inlined and compiles down to a simple array access/append, avoiding function call overhead.
+func hanldeLineWithParser(line []byte, cols []string, w io.ByteWriter) error {
 	parser := parserPool.Get()
 	defer parserPool.Put(parser)
 	v, err := parser.ParseBytes(line)
@@ -212,7 +218,7 @@ func hanldeLineWithParser(line []byte, cols []string, w io.Writer) error {
 	}
 	for i, col := range cols {
 		if i > 0 {
-			w.Write([]byte(","))
+			w.WriteByte(',')
 		}
 		escapeFieldByte(v.Get(col).MarshalTo(nil), w)
 		// escapeFieldByte([]byte(v.Get(col).String()), w)
@@ -220,13 +226,13 @@ func hanldeLineWithParser(line []byte, cols []string, w io.Writer) error {
 	return nil
 }
 
-func escapeFieldByte(field []byte, dst io.Writer) {
-	dst.Write([]byte{'"'})
+func escapeFieldByte(field []byte, dst io.ByteWriter) {
+	dst.WriteByte('"')
 	for _, c := range field {
 		if c == '"' { // escape quotes by doubling
-			dst.Write([]byte{'"'})
+			dst.WriteByte('"')
 		}
-		dst.Write([]byte{c})
+		dst.WriteByte(c)
 	}
-	dst.Write([]byte{'"'})
+	dst.WriteByte('"')
 }
