@@ -304,12 +304,7 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 		return sendToStream(ctx, p.outStream, chunk)
 	}
 
-	var (
-		lineDetails = p.lineDetailsPool.Get().(*LineDetails)
-		data        = chunk.data[:chunk.endingPos]
-
-		lineStart, ind, lineEnd int
-	)
+	lineDetails := p.lineDetailsPool.Get().(*LineDetails)
 
 	// put the original chunk data back to the pool
 	defer p.putChunkToPool(chunk)
@@ -318,20 +313,12 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 	lineDetails.ChunkID, lineDetails.ReaderID = chunk.id, chunk.readerID
 	resChunk := p.newChunkFromPool(chunk.id, chunk.readerID)
 
-	for lineStart < len(data) {
-		ind = bytes.IndexByte(data[lineStart:], '\n')
-		lineEnd = lineStart + ind // the ind is relative to buff passed to IndexByte
-		if ind == -1 {
-			lineEnd = len(data)
-		}
-
-		if err := p.customLineProcessor(data[lineStart:lineEnd], lineDetails, resChunk); err != nil {
+	for line := range Lines(chunk.data[:chunk.endingPos]) {
+		if err := p.customLineProcessor(line, lineDetails, resChunk); err != nil {
 			p.putChunkToPool(resChunk)
 			return err
 		}
-
 		EnsureNewLineAtEnd(resChunk)
-		lineStart = lineEnd + 1
 	}
 
 	// Learning: writing each line to the output stream one by one drastically worse the performance

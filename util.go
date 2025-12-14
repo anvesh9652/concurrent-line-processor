@@ -4,10 +4,12 @@
 package concurrentlineprocessor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"math"
 	"os"
 	"runtime/debug"
@@ -35,6 +37,23 @@ func IfNull[T any](org *T, def T) T {
 		return *org
 	}
 	return def
+}
+
+// returs a proper line, retured line will not have any new line at end
+func Lines(l []byte) iter.Seq[[]byte] {
+	return func(yeild func([]byte) bool) {
+		var s int
+		for s < len(l) {
+			i := bytes.IndexByte(l[s:], '\n')
+			if i == -1 {
+				i = len(l) - s
+			}
+			if !yeild(l[s : s+i : len(l)]) {
+				return
+			}
+			s += i + 1
+		}
+	}
 }
 
 func ExitOnError(err error) {
