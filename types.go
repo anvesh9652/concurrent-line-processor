@@ -15,34 +15,56 @@ type (
 	// Options are passed to NewConcurrentLineProcessor to customize behavior.
 	Option func(*concurrentLineProcessor)
 
-	// DataProcessor is a function type for processing individual lines/chunks.
-	// It receives a line/chunk as []byte and info and then the processed line/chunk should be written out
-	// return any error.
-	// Implementations must be thread-safe as they may be called concurrently.
+	// DataProcessor is a function type for processing individual lines or chunks.
+	// It receives the data as []byte, contextual info via ChunkDetails (containing ReaderID and ChunkID),
+	// and an io.Writer to write the processed output to.
+	//
+	// The processor must write its output to the provided io.Writer rather than returning the result.
+	// This design allows for efficient streaming without intermediate allocations.
+	//
+	// Implementations must be thread-safe as they may be called concurrently from multiple workers.
+	// Do not mutate shared state without proper synchronization (e.g., sync.Mutex).
+	//
+	// Example:
+	//
+	//	func(b []byte, info *ChunkDetails, out io.Writer) error {
+	//	    _, err := out.Write(bytes.ToUpper(b))
+	//	    return err
+	//	}
 	DataProcessor func(b []byte, info *ChunkDetails, out io.Writer) error
 )
 
-// Chunk represents a piece of data to be processed, containing an ID for ordering
-// and a pointer to the actual data buffer.
+// Chunk represents a piece of data to be processed.
+// It implements io.Writer and io.ByteWriter for efficient data accumulation.
+//
+// Each chunk has an ID for ordering within a reader and a readerID to identify
+// which source reader it came from (useful when processing multiple readers).
 type Chunk struct {
-	data     []byte
-	id       int
+	// data holds the raw bytes of the chunk.
+	data []byte
+	// id is the sequential chunk identifier within a single reader.
+	id int
+	// readerID identifies which source reader this chunk came from.
 	readerID int
 
-	// We don't want to do keep reslicing the data, use copy over append
-	// So we keep track of where the data ends. data after this point is a junk.
+	// endingPos marks the end of valid data in the buffer.
+	// Data beyond this position should be ignored as it may contain stale content
+	// from previous pool reuse. This avoids repeated reslicing.
 	endingPos int
 
-	// rowsWritten keeps track of how many rows were written in this chunk after processing.
+	// rowsWritten tracks how many rows were written in this chunk after processing.
 	rowsWritten int64
 }
 
-// ChunkDetails provides contextual information about a line being processed.
-// All the fields follow zero-based indexing.
+// ChunkDetails provides contextual information about the data being processed.
+// It is passed to DataProcessor functions to provide context about the source.
+// All fields use zero-based indexing.
 type ChunkDetails struct {
-	// ReaderID is the ID of the source reader from which this line was read.
+	// ReaderID identifies which source reader this data came from.
+	// Useful when processing multiple readers via WithMultiReaders.
 	ReaderID int
-	// ChunkID is the ID of the chunk which we have read from the source reader.
+	// ChunkID is the sequential ID of the chunk within its source reader.
+	// Can be used for ordering or debugging purposes.
 	ChunkID int
 }
 
@@ -61,9 +83,18 @@ type Metrics struct {
 	TimeTook time.Duration `json:"time_took"`
 }
 
-// concurrentLineProcessor provides high-performance, concurrent line-by-line processing
+// concurrentLineProcessor provides high-performance, concurrent processing
 // of large files or streams. It implements io.Reader, allowing processed data to be
-// read using standard Go I/O patterns.
+// read using standard Go I/O patterns like io.Copy, io.ReadAll, or bufio.Scanner.
+//
+// The processor supports two modes:
+//   - Line processing: each line is processed individually (WithCustomLineProcessor)
+//   - Chunk processing: entire chunks are processed at once (WithCustomChunkProcessor)
+//
+// Thread Safety:
+//   - The Read method should be called from a single goroutine (standard io.Reader contract).
+//   - Metrics can be read concurrently at any time.
+//   - Custom processors are called concurrently and must be thread-safe.
 type concurrentLineProcessor struct {
 	chunkPool        sync.Pool
 	chunkDetailsPool sync.Pool
@@ -73,8 +104,8 @@ type concurrentLineProcessor struct {
 	// ctx is the context for managing cancellation and timeouts.
 	ctx context.Context
 
-	// customDataProcessor allows you to process each line of the input data.
-	// It is not thread-safe. You can't update anything outside of the function unless you use a mutex.
+	// customDataProcessor processes each line or chunk depending on isLineProcessor.
+	// Must be thread-safe as it's called concurrently from multiple workers.
 	customDataProcessor DataProcessor
 
 	inStream  chan *Chunk
@@ -99,12 +130,16 @@ type concurrentLineProcessor struct {
 	// rowsReadLimit is the limit on the number of rows to read. Default is -1, which means no limit.
 	rowsReadLimit int
 
-	// isLineProcessor indicates whether a custom line processor is set.
-	// If true, the processor will use the customLineProcessor to process each line.
+	// isLineProcessor determines the processing mode:
+	//   - nil: no custom processor, pass-through mode
+	//   - true: line-by-line processing (WithCustomLineProcessor)
+	//   - false: chunk processing (WithCustomChunkProcessor)
 	isLineProcessor *bool
 }
 
-// Implementation of io.Writer interface for any future use.
+// Write implements io.Writer, appending src to the chunk's data buffer.
+// It uses copy for efficiency when possible, falling back to append for overflow.
+// The endingPos is updated to reflect the new data boundary.
 func (chunk *Chunk) Write(src []byte) (int, error) {
 	start := chunk.endingPos
 	if copied := copy(chunk.data[start:], src); copied < len(src) {

@@ -1,18 +1,26 @@
 // Package concurrentlineprocessor provides a high-performance, concurrent line-by-line processor for large files or streams.
 //
-// This package allows you to efficiently process large files or streams by splitting the input into chunks and processing each line concurrently using multiple goroutines.
-// It now supports orchestrating multiple io.ReadCloser sources as a single logical stream, allowing you to merge large datasets without custom plumbing.
+// This package allows you to efficiently process large files or streams by splitting the input into chunks
+// and processing each line (or chunk) concurrently using multiple goroutines.
+// It supports orchestrating multiple io.ReadCloser sources as a single logical stream,
+// allowing you to merge large datasets without custom plumbing.
 //
 // # Features
-//   - Concurrent processing of lines using a configurable number of workers (goroutines)
-//   - Custom line processor function for transforming or filtering lines
-//   - Metrics reporting (bytes read, rows read, processing time, etc.)
-//   - Optional row read limit
+//   - Concurrent processing using a configurable number of workers (goroutines)
+//   - Custom line processor function for transforming or filtering individual lines
+//   - Custom chunk processor function for processing entire chunks at once
+//   - ChunkDetails context passed to processors with ReaderID and ChunkID
+//   - Metrics reporting (bytes read/written, rows read/written, processing time)
+//   - Optional row read limit for sampling or testing
+//   - Multi-source input: merge multiple io.ReadCloser inputs into one stream
+//   - Backpressure-friendly internal bounded channels
+//   - Memory-efficient sync.Pool-based chunk allocation
 //
 // # Basic Usage
 //
 //	import (
 //	    "os"
+//	    "io"
 //	    clp "github.com/anvesh9652/concurrent-line-processor"
 //	)
 //
@@ -26,10 +34,27 @@
 //
 // # Custom Line Processing
 //
-//	pr := clp.NewConcurrentLineProcessor(f, clp.WithCustomLineProcessor(func(line []byte) ([]byte, error) {
-//	    // Transform or filter the line
-//	    return bytes.ToUpper(line), nil
-//	}))
+// The DataProcessor function signature is: func(b []byte, info *ChunkDetails, out io.Writer) error
+// Processors write their output to the provided io.Writer and return any error.
+//
+//	pr := clp.NewConcurrentLineProcessor(f, clp.WithCustomLineProcessor(
+//	    func(line []byte, info *clp.ChunkDetails, out io.Writer) error {
+//	        _, err := out.Write(bytes.ToUpper(line))
+//	        return err
+//	    },
+//	))
+//
+// # Custom Chunk Processing
+//
+// For processing entire chunks at once (e.g., aggregation):
+//
+//	pr := clp.NewConcurrentLineProcessor(f, clp.WithCustomChunkProcessor(
+//	    func(chunk []byte, info *clp.ChunkDetails, out io.Writer) error {
+//	        // Process entire chunk
+//	        _, err := out.Write(chunk)
+//	        return err
+//	    },
+//	))
 //
 // # Metrics
 //

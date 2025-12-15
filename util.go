@@ -39,7 +39,9 @@ func IfNull[T any](org *T, def T) T {
 	return def
 }
 
-// returs a proper line, retured line will not have any new line at end
+// Lines returns an iterator over lines in the given byte slice.
+// Each yielded line does not include the trailing newline character.
+// Uses Go 1.23+ range-over-func iteration pattern.
 func Lines(l []byte) iter.Seq[[]byte] {
 	return func(yeild func([]byte) bool) {
 		var s int
@@ -63,6 +65,9 @@ func ExitOnError(err error) {
 	}
 }
 
+// EnsureNewLineAtEnd ensures the chunk's data ends with a newline character.
+// If the chunk is nil or empty, this is a no-op.
+// It modifies the chunk in-place, either by setting an existing byte or appending.
 func EnsureNewLineAtEnd(chunk *Chunk) {
 	if chunk == nil || chunk.endingPos == 0 {
 		return
@@ -86,6 +91,8 @@ func PrintAsJsonString(v any) {
 	fmt.Println(string(b))
 }
 
+// FormatBytes formats a byte count into a human-readable string.
+// Use BaseSI (1000) for SI units (KB, MB, GB) or BaseBinary (1024) for binary units (KiB, MiB, GiB).
 func FormatBytes(size, base float64) string {
 	formatValue := func(v float64, unit string, base float64) string {
 		if base == BaseBinary {
@@ -104,6 +111,9 @@ func FormatBytes(size, base float64) string {
 	return formatValue(size/math.Pow(base, 3), "G", base)
 }
 
+// FormatDuration formats a duration into a human-readable string with appropriate precision.
+// Precision decreases as duration increases: nanoseconds for tiny durations,
+// milliseconds for sub-second, seconds for sub-minute, etc.
 func FormatDuration(d time.Duration) string {
 	if d < time.Microsecond {
 		return d.Round(time.Nanosecond).String()
@@ -127,6 +137,8 @@ func FormatDuration(d time.Duration) string {
 	return d.String()
 }
 
+// PrintSummaryPeriodically prints the processor's summary at regular intervals.
+// It stops when the context is cancelled. Useful for monitoring long-running processes.
 func PrintSummaryPeriodically(ctx context.Context, p *concurrentLineProcessor, interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
