@@ -46,5 +46,5 @@ func MultiReaders(files []string) {
 		log.Fatal(err)
 	}
 	// chunkSize=64KB workers=10 bytesRead=34.99GB bytesWritten=34.99GB rowsRead=1015862593 rowsWritten=1015862594 throughput=5.74GB/s elapsed=6.09s
-	fmt.Println(pr.Summary())
+	// fmt.Println(pr.Summary())
 }

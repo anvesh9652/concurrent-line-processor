@@ -76,7 +76,7 @@ func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 	for k := range keys {
 		columns = append(columns, k)
 	}
-	fmt.Println(nr.Summary())
+	// fmt.Println(nr.Summary())
 	return columns, nil
 }
 
@@ -97,7 +97,7 @@ func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
 	}
 
 	_, err := io.Copy(w, nr)
-	fmt.Println(nr.Summary())
+	// fmt.Println(nr.Summary())
 	return err
 }
 
@@ -123,7 +123,7 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 	}
 
 	_, err = io.Copy(w, nr)
-	fmt.Println(nr.Summary())
+	// fmt.Println(nr.Summary())
 	return err
 }
 
