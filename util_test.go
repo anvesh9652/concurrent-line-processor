@@ -76,49 +76,104 @@ func TestAppendNewLine(t *testing.T) {
 }
 
 func TestFormatBytes(t *testing.T) {
-	t.Run("bytes less than 1KB", func(t *testing.T) {
-		result := FormatBytes(512)
+	// SI Base (1000) Tests
+	t.Run("SI: bytes less than base", func(t *testing.T) {
+		result := FormatBytes(512, BaseSI)
 		assert.Equal(t, "512B", result)
 	})
 
-	t.Run("exact 1KB", func(t *testing.T) {
-		result := FormatBytes(1024)
+	t.Run("SI: exact 1KB", func(t *testing.T) {
+		result := FormatBytes(1000, BaseSI)
 		assert.Equal(t, "1KB", result)
 	})
 
-	t.Run("kilobytes with decimals", func(t *testing.T) {
-		result := FormatBytes(1536) // 1.5KB
+	t.Run("SI: kilobytes with decimals", func(t *testing.T) {
+		result := FormatBytes(1500, BaseSI) // 1.5KB
 		assert.Equal(t, "1.5KB", result)
 	})
 
-	t.Run("exact 1MB", func(t *testing.T) {
-		result := FormatBytes(1024 * 1024)
+	t.Run("SI: exact 1MB", func(t *testing.T) {
+		result := FormatBytes(1000*1000, BaseSI)
 		assert.Equal(t, "1MB", result)
 	})
 
-	t.Run("megabytes with decimals", func(t *testing.T) {
-		result := FormatBytes(2.5 * 1024 * 1024)
+	t.Run("SI: megabytes with decimals", func(t *testing.T) {
+		result := FormatBytes(2.5*1000*1000, BaseSI)
 		assert.Equal(t, "2.5MB", result)
 	})
 
-	t.Run("exact 1GB", func(t *testing.T) {
-		result := FormatBytes(1024 * 1024 * 1024)
+	t.Run("SI: exact 1GB", func(t *testing.T) {
+		result := FormatBytes(1000*1000*1000, BaseSI)
 		assert.Equal(t, "1GB", result)
 	})
 
-	t.Run("gigabytes with decimals", func(t *testing.T) {
-		result := FormatBytes(3.75 * 1024 * 1024 * 1024)
+	t.Run("SI: gigabytes with decimals", func(t *testing.T) {
+		result := FormatBytes(3.75*1000*1000*1000, BaseSI)
 		assert.Equal(t, "3.75GB", result)
 	})
 
+	t.Run("SI: removes trailing zeros", func(t *testing.T) {
+		result := FormatBytes(10000, BaseSI) // 10KB exactly
+		assert.Equal(t, "10KB", result)
+	})
+
+	// Binary Base (1024) Tests
+	t.Run("Binary: bytes less than base", func(t *testing.T) {
+		result := FormatBytes(512, BaseBinary)
+		assert.Equal(t, "512B", result)
+	})
+
+	t.Run("Binary: exact 1KiB", func(t *testing.T) {
+		result := FormatBytes(1024, BaseBinary)
+		assert.Equal(t, "1KiB", result)
+	})
+
+	t.Run("Binary: kibibytes with decimals", func(t *testing.T) {
+		result := FormatBytes(1536, BaseBinary) // 1.5KiB
+		assert.Equal(t, "1.5KiB", result)
+	})
+
+	t.Run("Binary: exact 1MiB", func(t *testing.T) {
+		result := FormatBytes(1024*1024, BaseBinary)
+		assert.Equal(t, "1MiB", result)
+	})
+
+	t.Run("Binary: mebibytes with decimals", func(t *testing.T) {
+		result := FormatBytes(2.5*1024*1024, BaseBinary)
+		assert.Equal(t, "2.5MiB", result)
+	})
+
+	t.Run("Binary: exact 1GiB", func(t *testing.T) {
+		result := FormatBytes(1024*1024*1024, BaseBinary)
+		assert.Equal(t, "1GiB", result)
+	})
+
+	t.Run("Binary: gibibytes with decimals", func(t *testing.T) {
+		result := FormatBytes(3.75*1024*1024*1024, BaseBinary)
+		assert.Equal(t, "3.75GiB", result)
+	})
+
+	t.Run("Binary: removes trailing zeros", func(t *testing.T) {
+		result := FormatBytes(10*1024, BaseBinary) // 10KiB exactly
+		assert.Equal(t, "10KiB", result)
+	})
+
+	// Edge Cases
 	t.Run("zero bytes", func(t *testing.T) {
-		result := FormatBytes(0)
+		result := FormatBytes(0, BaseSI)
+		assert.Equal(t, "0B", result)
+		result = FormatBytes(0, BaseBinary)
 		assert.Equal(t, "0B", result)
 	})
 
-	t.Run("removes trailing zeros", func(t *testing.T) {
-		result := FormatBytes(1024 * 10) // 10KB exactly
-		assert.Equal(t, "10KB", result)
+	t.Run("very small decimal values", func(t *testing.T) {
+		result := FormatBytes(1024.01, BaseBinary)
+		assert.Equal(t, "1KiB", result) // Should trim .00
+	})
+
+	t.Run("fractional KB/KiB", func(t *testing.T) {
+		result := FormatBytes(2048.5, BaseBinary) // 2.0005KiB
+		assert.Equal(t, "2KiB", result)
 	})
 }
 

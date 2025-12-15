@@ -43,25 +43,63 @@ func WithWorkers(n int) Option {
 	}
 }
 
-// WithCustomLineProcessor sets a custom function to process each line.
-// The function receives a line as []byte and should return the processed line.
+// WithCustomLineProcessor sets a custom function to process each line individually.
+// The function receives a line as []byte (without trailing newline), a ChunkDetails
+// struct with contextual info (ReaderID, ChunkID), and an io.Writer to write output to.
+//
+// The processor must write its output to the provided io.Writer. A newline is
+// automatically appended after each processed line.
+//
 // The function must be thread-safe and should not modify external state
-// without proper synchronization.
+// without proper synchronization (e.g., sync.Mutex).
 //
 // Example:
 //
 //	// Convert lines to uppercase
-//	processor := func(line []byte) ([]byte, error) {
-//	    return bytes.ToUpper(line), nil
+//	processor := func(line []byte, info *clp.ChunkDetails, out io.Writer) error {
+//	    _, err := out.Write(bytes.ToUpper(line))
+//	    return err
 //	}
 //	clp.NewConcurrentLineProcessor(reader, clp.WithCustomLineProcessor(processor))
-func WithCustomLineProcessor(c LineProcessor) Option {
+func WithCustomLineProcessor(c DataProcessor) Option {
 	return func(pr *concurrentLineProcessor) {
 		if c == nil {
 			return
 		}
-		pr.hasCustomLineProcessor = true
-		pr.customLineProcessor = c
+		pr.isLineProcessor = Ptr(true)
+		pr.customDataProcessor = c
+	}
+}
+
+// WithCustomChunkProcessor sets a custom function to process entire chunks at once.
+// Unlike WithCustomLineProcessor, this processes the full chunk buffer rather than
+// individual lines, which can be more efficient for certain operations like aggregation.
+//
+// The function receives a chunk as []byte, a ChunkDetails struct with contextual info
+// (ReaderID, ChunkID), and an io.Writer to write output to.
+//
+// The processor must write its output to the provided io.Writer. A newline is
+// automatically ensured at the end of the chunk output.
+//
+// The function must be thread-safe and should not modify external state
+// without proper synchronization (e.g., sync.Mutex).
+//
+// Example:
+//
+//	// Process entire chunk and extract all JSON keys
+//	processor := func(chunk []byte, info *clp.ChunkDetails, out io.Writer) error {
+//	    // Process chunk as a whole
+//	    _, err := out.Write(chunk)
+//	    return err
+//	}
+//	clp.NewConcurrentLineProcessor(reader, clp.WithCustomChunkProcessor(processor))
+func WithCustomChunkProcessor(c DataProcessor) Option {
+	return func(pr *concurrentLineProcessor) {
+		if c == nil {
+			return
+		}
+		pr.isLineProcessor = Ptr(false)
+		pr.customDataProcessor = c
 	}
 }
 

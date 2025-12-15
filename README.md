@@ -8,8 +8,10 @@ A high-performance, concurrent line-by-line processor for large files and stream
 ## Features
 
 - **Concurrent Processing**: Process lines concurrently with a configurable number of worker goroutines
+- **Dual Processing Modes**: Process individual lines or entire chunks with custom processors
 - **Memory Efficient**: Uses a `sync.Pool` and streaming; never loads entire file into memory
-- **Customizable**: Supply a thread-safe custom line processor function
+- **Customizable**: Supply a thread-safe custom line or chunk processor function
+- **Context-Aware Processors**: Processors receive `ChunkDetails` with ReaderID and ChunkID for tracking
 - **Metrics**: Built-in metrics (bytes read/written, rows read/written, processing duration)
 - **Standard Interface**: Implements `io.Reader` and has a `Close()` for resource cleanup
 - **Flexible Configuration**: Configure chunk size, worker count, channel size, and row read limit
@@ -121,8 +123,11 @@ func main() {
     }
     defer file.Close()
 
-    upperCaseProcessor := func(line []byte) ([]byte, error) {
-        return bytes.ToUpper(line), nil
+    // DataProcessor signature: func(b []byte, info *ChunkDetails, out io.Writer) error
+    // Processors write output to the provided io.Writer
+    upperCaseProcessor := func(line []byte, info *clp.ChunkDetails, out io.Writer) error {
+        _, err := out.Write(bytes.ToUpper(line))
+        return err
     }
 
     processor := clp.NewConcurrentLineProcessor(file,
@@ -167,11 +172,12 @@ func convertCSVToJSONL(inputFile, outputFile string, headers []string) error {
     }
     defer output.Close()
 
-    csvToJSONProcessor := func(line []byte) ([]byte, error) {
+    // The processor receives ChunkDetails with ReaderID and ChunkID for context
+    csvToJSONProcessor := func(line []byte, info *clp.ChunkDetails, out io.Writer) error {
         reader := csv.NewReader(bytes.NewReader(line))
         row, err := reader.Read()
         if err != nil {
-            return nil, err
+            return err
         }
         record := make(map[string]string)
         for i, header := range headers {
@@ -179,7 +185,7 @@ func convertCSVToJSONL(inputFile, outputFile string, headers []string) error {
                 record[header] = row[i]
             }
         }
-        return json.Marshal(record)
+        return json.NewEncoder(out).Encode(record)
     }
 
     processor := clp.NewConcurrentLineProcessor(input,
@@ -260,8 +266,8 @@ Processing stops when the limit of newline-delimited rows is reached. Internally
 The `examples/` directory contains complete examples demonstrating:
 
 - Basic file processing
-- CSV to JSONL conversion
-- JSONL to CSV conversion
+- CSV to JSONL conversion (line processing)
+- JSONL to CSV conversion (chunk processing with `WithCustomChunkProcessor`)
 - Custom line transformations
 - Multi-reader merging
 - Performance profiling
@@ -284,12 +290,13 @@ type Metrics struct {
 
 - Call `Read` from a single goroutine at a time (standard `io.Reader` contract).
 - The internal pipeline is concurrent; metrics fields are updated atomically and can be read safely at any time.
-- Custom line processor functions must be thread-safe. Avoid mutating shared state unless you synchronize externally.
+- Custom processor functions (`DataProcessor`) must be thread-safe. They receive an `io.Writer` to write output to, avoiding shared state issues.
+- If your processor needs to update external state, use proper synchronization (e.g., `sync.Mutex`).
 - When multiple source readers are configured, their data is consumed concurrently.
 
 ## Requirements
 
-- Go 1.24.0 or later
+- Go 1.25.0 or later (uses range-over-func iteration)
 - External dependency: `golang.org/x/sync` (errgroup)
 
 ## License

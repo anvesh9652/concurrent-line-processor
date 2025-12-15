@@ -1,18 +1,26 @@
 // Package concurrentlineprocessor provides a high-performance, concurrent line-by-line processor for large files or streams.
 //
-// This package allows you to efficiently process large files or streams by splitting the input into chunks and processing each line concurrently using multiple goroutines.
-// It now supports orchestrating multiple io.ReadCloser sources as a single logical stream, allowing you to merge large datasets without custom plumbing.
+// This package allows you to efficiently process large files or streams by splitting the input into chunks
+// and processing each line (or chunk) concurrently using multiple goroutines.
+// It supports orchestrating multiple io.ReadCloser sources as a single logical stream,
+// allowing you to merge large datasets without custom plumbing.
 //
 // # Features
-//   - Concurrent processing of lines using a configurable number of workers (goroutines)
-//   - Custom line processor function for transforming or filtering lines
-//   - Metrics reporting (bytes read, rows read, processing time, etc.)
-//   - Optional row read limit
+//   - Concurrent processing using a configurable number of workers (goroutines)
+//   - Custom line processor function for transforming or filtering individual lines
+//   - Custom chunk processor function for processing entire chunks at once
+//   - ChunkDetails context passed to processors with ReaderID and ChunkID
+//   - Metrics reporting (bytes read/written, rows read/written, processing time)
+//   - Optional row read limit for sampling or testing
+//   - Multi-source input: merge multiple io.ReadCloser inputs into one stream
+//   - Backpressure-friendly internal bounded channels
+//   - Memory-efficient sync.Pool-based chunk allocation
 //
 // # Basic Usage
 //
 //	import (
 //	    "os"
+//	    "io"
 //	    clp "github.com/anvesh9652/concurrent-line-processor"
 //	)
 //
@@ -26,10 +34,27 @@
 //
 // # Custom Line Processing
 //
-//	pr := clp.NewConcurrentLineProcessor(f, clp.WithCustomLineProcessor(func(line []byte) ([]byte, error) {
-//	    // Transform or filter the line
-//	    return bytes.ToUpper(line), nil
-//	}))
+// The DataProcessor function signature is: func(b []byte, info *ChunkDetails, out io.Writer) error
+// Processors write their output to the provided io.Writer and return any error.
+//
+//	pr := clp.NewConcurrentLineProcessor(f, clp.WithCustomLineProcessor(
+//	    func(line []byte, info *clp.ChunkDetails, out io.Writer) error {
+//	        _, err := out.Write(bytes.ToUpper(line))
+//	        return err
+//	    },
+//	))
+//
+// # Custom Chunk Processing
+//
+// For processing entire chunks at once (e.g., aggregation):
+//
+//	pr := clp.NewConcurrentLineProcessor(f, clp.WithCustomChunkProcessor(
+//	    func(chunk []byte, info *clp.ChunkDetails, out io.Writer) error {
+//	        // Process entire chunk
+//	        _, err := out.Write(chunk)
+//	        return err
+//	    },
+//	))
 //
 // # Metrics
 //
@@ -108,11 +133,9 @@ func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLine
 
 		pr: pr, pw: pw,
 		now: time.Now(),
-
-		customLineProcessor: func(b []byte, _ *LineDetails) ([]byte, error) { return b, nil },
 	}, opts...)
 
-	p.lineDetailsPool = sync.Pool{New: func() any { return &LineDetails{} }}
+	p.chunkDetailsPool = sync.Pool{New: func() any { return &ChunkDetails{} }}
 	p.chunkPool = sync.Pool{
 		New: func() any {
 			return &Chunk{data: make([]byte, p.chunkSize)}
@@ -122,7 +145,7 @@ func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLine
 	p.inStream = make(chan *Chunk, p.channelSize)
 	p.outStream = make(chan *Chunk, p.channelSize)
 
-	go func() { p.start() }()
+	go p.start()
 	return p
 }
 
@@ -171,15 +194,15 @@ func (p *concurrentLineProcessor) Summary() string {
 		sec = 1 // to avoid division by zero
 	}
 
-	return "chunkSize=" + FormatBytes(float64(p.chunkSize)) +
+	return "chunkSize=" + FormatBytes(float64(p.chunkSize), BaseBinary) +
 		" workers=" + strconv.Itoa(p.workers) +
 		" channelSize=" + strconv.Itoa(p.channelSize) +
 		" rowsReadLimit=" + strconv.Itoa(p.rowsReadLimit) +
-		" bytesRead=" + FormatBytes(float64(metrics.BytesRead)) +
-		" bytesWritten=" + FormatBytes(float64(metrics.BytesWritten)) +
+		" bytesRead=" + FormatBytes(float64(metrics.BytesRead), BaseSI) +
+		" bytesWritten=" + FormatBytes(float64(metrics.BytesWritten), BaseSI) +
 		" rowsRead=" + strconv.FormatInt(metrics.RowsRead, 10) +
 		" rowsWritten=" + strconv.FormatInt(metrics.RowsWritten, 10) +
-		" throughput=" + FormatBytes(float64(metrics.BytesWritten)/sec) + "/s" +
+		" throughput=" + FormatBytes(float64(metrics.BytesWritten)/sec, BaseSI) + "/s" +
 		" elapsed=" + FormatDuration(metrics.TimeTook)
 }
 
@@ -230,7 +253,7 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 		}
 
 		chunk := p.newChunkFromPool(chunkID, readerID)
-		copied := moveAllData(chunk, 0, leftOver)
+		_, _ = chunk.Write(leftOver)
 
 		read, readErr := r.Read(currBuff.data)
 		if readErr != nil {
@@ -239,14 +262,14 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 			}
 
 			var err error
-			if copied > 0 {
+			if chunk.endingPos > 0 {
 				atomic.AddInt64(&p.metrics.RowsRead, 1) // if we are here then it's the last line without "\n" at end
 				err = sendToStream(ctx, p.inStream, chunk)
 			}
 			return err
 		}
 
-		moveAllData(chunk, copied, currBuff.data[:read])
+		_, _ = chunk.Write(currBuff.data[:read])
 		chunk.endingPos, linesToUpdate = trimmedBuff(chunk.data[:chunk.endingPos], p.rowsReadLimit, rr)
 		atomic.AddInt64(&p.metrics.RowsRead, int64(linesToUpdate))
 		atomic.AddInt64(&p.metrics.BytesRead, int64(read))
@@ -295,43 +318,38 @@ func (p *concurrentLineProcessor) processChunks(ctx context.Context) error {
 }
 
 func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk *Chunk) error {
-	if !p.hasCustomLineProcessor {
+	if p.isLineProcessor == nil || p.customDataProcessor == nil {
 		EnsureNewLineAtEnd(chunk)
 		chunk.rowsWritten += int64(bytes.Count(chunk.data[:chunk.endingPos], []byte("\n")))
 		return sendToStream(ctx, p.outStream, chunk)
 	}
 
 	var (
-		lineDetails = p.lineDetailsPool.Get().(*LineDetails)
-		data        = chunk.data[:chunk.endingPos]
-
-		lineStart, ind, lineEnd int
+		chunkDetails = p.chunkDetailsPool.Get().(*ChunkDetails)
+		data         = chunk.data[:chunk.endingPos]
 	)
 
 	// put the original chunk data back to the pool
 	defer p.putChunkToPool(chunk)
-	defer p.lineDetailsPool.Put(lineDetails)
+	defer p.chunkDetailsPool.Put(chunkDetails)
 
-	lineDetails.ChunkID, lineDetails.ReaderID = chunk.id, chunk.readerID
+	chunkDetails.ChunkID, chunkDetails.ReaderID = chunk.id, chunk.readerID
 	resChunk := p.newChunkFromPool(chunk.id, chunk.readerID)
 
-	for lineStart < len(data) {
-		ind = bytes.IndexByte(data[lineStart:], '\n')
-		lineEnd = lineStart + ind // the ind is relative to buff passed to IndexByte
-		if ind == -1 {
-			lineEnd = len(data)
-		}
-
-		pb, err := p.customLineProcessor(data[lineStart:lineEnd], lineDetails)
-		if err != nil {
+	if !*p.isLineProcessor {
+		if err := p.customDataProcessor(data, chunkDetails, resChunk); err != nil {
 			p.putChunkToPool(resChunk)
 			return err
 		}
-
-		moveAllData(resChunk, resChunk.endingPos, pb)
 		EnsureNewLineAtEnd(resChunk)
-
-		lineStart = lineEnd + 1
+	} else {
+		for line := range Lines(chunk.data[:chunk.endingPos]) {
+			if err := p.customDataProcessor(line, chunkDetails, resChunk); err != nil {
+				p.putChunkToPool(resChunk)
+				return err
+			}
+			EnsureNewLineAtEnd(resChunk)
+		}
 	}
 
 	// Learning: writing each line to the output stream one by one drastically worse the performance
@@ -444,12 +462,4 @@ func (p *concurrentLineProcessor) newChunkFromPool(chunkID, readerID int) *Chunk
 	chunk.data = chunk.data[:p.chunkSize]
 	chunk.id, chunk.readerID, chunk.endingPos, chunk.rowsWritten = chunkID, readerID, 0, 0
 	return chunk
-}
-
-func moveAllData(chunk *Chunk, start int, src []byte) int {
-	if copied := copy(chunk.data[start:], src); copied < len(src) {
-		chunk.data = append(chunk.data, src[copied:]...) // append the remaining bytes
-	}
-	chunk.endingPos += len(src)
-	return len(src)
 }

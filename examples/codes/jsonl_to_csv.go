@@ -42,22 +42,32 @@ func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 		mu   sync.Mutex
 		keys = make(map[string]struct{})
 	)
-	customProcessor := func(b []byte, _ *clp.LineDetails) ([]byte, error) {
+
+	customProcessor := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
 		var d map[string]any
-		if err := json.Unmarshal(b, &d); err != nil {
-			return nil, err
+
+		local := make(map[string]struct{})
+		dec := json.NewDecoder(bytes.NewReader(b))
+		for dec.More() {
+			if err := dec.Decode(&d); err != nil {
+				return err
+			}
+			for k := range d {
+				local[k] = struct{}{}
+			}
 		}
 		mu.Lock()
-		for k := range d {
+		for k := range local {
 			keys[k] = struct{}{}
 		}
 		mu.Unlock()
-		return b, nil
+		_, err := w.Write(b)
+		return err
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
 		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers), clp.WithRowsReadLimit(rowsLimit),
-		clp.WithCustomLineProcessor(customProcessor),
+		clp.WithCustomChunkProcessor(customProcessor),
 	)
 	if _, err := io.Copy(io.Discard, nr); err != nil {
 		return nil, err
@@ -72,23 +82,9 @@ func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 
 // These functions can be reusalbe outside of this package
 func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
-	// pool of reusable buffers; keep them small initially, grow as needed
-	buffPool := sync.Pool{
-		New: func() any { return &bytes.Buffer{} },
-	}
-
-	customProcessor := func(b []byte, _ *clp.LineDetails) ([]byte, error) {
-		buff := buffPool.Get().(*bytes.Buffer)
-		buff.Reset()
-
-		// if err := handleLineNormalWay(b, columns, buff); err != nil {
-		if err := hanldeLineWithParser(b, columns, buff); err != nil {
-			return nil, err
-		}
-
-		out := append([]byte(nil), buff.Bytes()...) // copy to avoid data race when buff reused before consumer copies
-		buffPool.Put(buff)
-		return out, nil
+	customProcessor := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
+		// return handleLineNormalWay(b, columns, w.(io.ByteWriter))
+		return hanldeLineWithParser(b, columns, w.(io.ByteWriter))
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
@@ -106,27 +102,14 @@ func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
 }
 
 func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
-	// pool of reusable buffers; keep them small initially, grow as needed
-	buffPool := sync.Pool{
-		New: func() any { return &bytes.Buffer{} },
-	}
-
 	columns, readers, err := getColumnsAndReaders(r)
 	if err != nil {
 		return err
 	}
 
-	customProcessor := func(b []byte, _ *clp.LineDetails) ([]byte, error) {
-		buff := buffPool.Get().(*bytes.Buffer)
-		buff.Reset()
-
-		// if err := handleLineNormalWay(b, columns, buff); err != nil {
-		if err := hanldeLineWithParser(b, columns, buff); err != nil {
-			return nil, err
-		}
-		out := append([]byte(nil), buff.Bytes()...) // copy to avoid data race when buff reused before consumer copies
-		buffPool.Put(buff)
-		return out, nil
+	customProcessor := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
+		// return handleLineNormalWay(b, columns, w.(io.ByteWriter))
+		return hanldeLineWithParser(b, columns, w.(io.ByteWriter))
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
@@ -214,7 +197,7 @@ func ConvertAnyToString(v any) string {
 	}
 }
 
-func handleLineNormalWay(b []byte, cols []string, w *bytes.Buffer) error {
+func handleLineNormalWay(b []byte, cols []string, w io.ByteWriter) error {
 	var d map[string]any
 	if err := json.Unmarshal(b, &d); err != nil {
 		return err
@@ -229,7 +212,13 @@ func handleLineNormalWay(b []byte, cols []string, w *bytes.Buffer) error {
 	return nil
 }
 
-func hanldeLineWithParser(line []byte, cols []string, w *bytes.Buffer) error {
+// Learning: Writing a single-byte slice (e.g., Write([]byte{','})) to an io.Writer is significantly slower
+// than using io.ByteWriter.WriteByte.
+// Reasons:
+// 1. Slice Allocation: Creating []byte{','} allocates a new slice header (and potentially backing array) every time.
+// 2. Generic Overhead: Write() handles arbitrary lengths, involving bounds checks and copy() logic, which is overkill for 1 byte.
+// 3. Compiler Optimization: WriteByte is often inlined and compiles down to a simple array access/append, avoiding function call overhead.
+func hanldeLineWithParser(line []byte, cols []string, w io.ByteWriter) error {
 	parser := parserPool.Get()
 	defer parserPool.Put(parser)
 	v, err := parser.ParseBytes(line)
@@ -246,7 +235,7 @@ func hanldeLineWithParser(line []byte, cols []string, w *bytes.Buffer) error {
 	return nil
 }
 
-func escapeFieldByte(field []byte, dst *bytes.Buffer) {
+func escapeFieldByte(field []byte, dst io.ByteWriter) {
 	dst.WriteByte('"')
 	for _, c := range field {
 		if c == '"' { // escape quotes by doubling

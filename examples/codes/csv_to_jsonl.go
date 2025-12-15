@@ -23,17 +23,17 @@ func InitConvertCtoJ(r io.ReadCloser) {
 // The reader should have header column
 func ConvertCSVToJsonl(r io.ReadCloser, w io.Writer) error {
 	cols, rc := getColumns(r)
-	customProcessor := func(b []byte, _ *clp.LineDetails) ([]byte, error) {
+	customProcessor := func(b []byte, _ *clp.ChunkDetails, o io.Writer) error {
 		cr := csv.NewReader(bytes.NewBuffer(b))
 		row, err := cr.Read()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		md := map[string]string{}
 		for i, col := range cols {
 			md[col] = row[i]
 		}
-		return json.Marshal(md)
+		return json.NewEncoder(o).Encode(md)
 	}
 
 	nr := clp.NewConcurrentLineProcessor(io.NopCloser(rc),
