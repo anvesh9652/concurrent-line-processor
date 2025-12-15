@@ -7,13 +7,14 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewReader_ReadsAllLines(t *testing.T) {
+func TestConcurrentLineProcessor_ReadsAllLines(t *testing.T) {
 	input := "line1\nline2\nline3\n"
 	r := newReadCloser(input)
 	pr := NewConcurrentLineProcessor(r)
@@ -29,7 +30,7 @@ func TestNewReader_ReadsAllLines(t *testing.T) {
 	assert.Equal(t, 3, pr.RowsRead())
 }
 
-func TestNewReader_CustomLineProcessor(t *testing.T) {
+func TestConcurrentLineProcessor_CustomLineProcessor(t *testing.T) {
 	input := "a\nb\nc\n"
 	r := newReadCloser(input)
 	pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(b []byte, _ *ChunkDetails, w io.Writer) error {
@@ -48,7 +49,7 @@ func TestNewReader_CustomLineProcessor(t *testing.T) {
 	assert.Equal(t, int64(len(out)), metrics.BytesWritten)
 }
 
-func TestNewReader_CustomProcessorReturnsNil(t *testing.T) {
+func TestConcurrentLineProcessor_LineProcessorSkipsOutput(t *testing.T) {
 	const lines = 1500
 	var sb strings.Builder
 	for i := 0; i < lines; i++ {
@@ -76,7 +77,7 @@ func TestNewReader_CustomProcessorReturnsNil(t *testing.T) {
 	assert.Equal(t, lines, pr.RowsRead())
 }
 
-func TestNewReader_EmptyInput(t *testing.T) {
+func TestConcurrentLineProcessor_EmptyInput(t *testing.T) {
 	r := newReadCloser("")
 	pr := NewConcurrentLineProcessor(r)
 	out, err := io.ReadAll(pr)
@@ -91,7 +92,7 @@ func TestNewReader_EmptyInput(t *testing.T) {
 	assert.Equal(t, 0, pr.RowsRead())
 }
 
-func TestNewReader_RowsReadLimit(t *testing.T) {
+func TestConcurrentLineProcessor_RowsReadLimit(t *testing.T) {
 	input := "1\n2\n3\n4\n5\n"
 	r := newReadCloser(input)
 	pr := NewConcurrentLineProcessor(r, WithRowsReadLimit(3))
@@ -107,7 +108,7 @@ func TestNewReader_RowsReadLimit(t *testing.T) {
 	assert.Equal(t, 3, pr.RowsRead())
 }
 
-func TestNewReader_ErrorInCustomProcessor(t *testing.T) {
+func TestConcurrentLineProcessor_ErrorInLineProcessor(t *testing.T) {
 	input := "x\ny\nz\n"
 	r := newReadCloser(input)
 	errMsg := "fail on y"
@@ -123,7 +124,7 @@ func TestNewReader_ErrorInCustomProcessor(t *testing.T) {
 	assert.Equal(t, errMsg, err.Error())
 }
 
-func TestNewReader_LargeInput(t *testing.T) {
+func TestConcurrentLineProcessor_LargeInput(t *testing.T) {
 	var sb strings.Builder
 	for i := 0; i < 10000; i++ {
 		sb.WriteString("row\n")
@@ -143,7 +144,7 @@ func TestNewReader_LargeInput(t *testing.T) {
 	assert.Equal(t, 10000, pr.RowsRead())
 }
 
-func TestNewReader_AlwaysNewlineAtEnd(t *testing.T) {
+func TestConcurrentLineProcessor_AlwaysNewlineAtEnd(t *testing.T) {
 	input := "foo\nbar\nbaz"
 	r := newReadCloser(input)
 	pr := NewConcurrentLineProcessor(r)
@@ -158,7 +159,7 @@ func TestNewReader_AlwaysNewlineAtEnd(t *testing.T) {
 	assert.Greater(t, metrics.BytesWritten, int64(0))
 }
 
-func TestNewReader_Concurrency(t *testing.T) {
+func TestConcurrentLineProcessor_Concurrency(t *testing.T) {
 	input := "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n"
 	r := newReadCloser(input)
 	pr := NewConcurrentLineProcessor(r, WithWorkers(4))
@@ -174,7 +175,7 @@ func TestNewReader_Concurrency(t *testing.T) {
 	assert.Equal(t, 10, pr.RowsRead())
 }
 
-func TestNewReader_SmallChunkSize_OrderNotGuaranteed(t *testing.T) {
+func TestConcurrentLineProcessor_SmallChunkSize_OrderNotGuaranteed(t *testing.T) {
 	input := "a\nb\nc\nd\ne\n"
 	r := newReadCloser(input)
 	pr := NewConcurrentLineProcessor(r, WithChunkSize(2)) // very small chunk size
@@ -203,7 +204,7 @@ func TestNewReader_SmallChunkSize_OrderNotGuaranteed(t *testing.T) {
 	assert.Greater(t, metrics.BytesWritten, int64(0))
 }
 
-func TestNewReader_MultipleReaders(t *testing.T) {
+func TestConcurrentLineProcessor_MultipleReaders(t *testing.T) {
 	r1 := newReadCloser("alpha\nbeta\n")
 	r2 := newReadCloser("gamma\ndelta\n")
 	pr := NewConcurrentLineProcessor(nil, WithMultiReaders(r1, r2))
@@ -237,7 +238,7 @@ func TestNewReader_MultipleReaders(t *testing.T) {
 	assert.Equal(t, 4, pr.RowsRead())
 }
 
-func TestNewReader_MultipleReadersLargeInput(t *testing.T) {
+func TestConcurrentLineProcessor_MultipleReadersLargeInput(t *testing.T) {
 	const (
 		readersCount   = 5
 		linesPerReader = 20000
@@ -280,7 +281,7 @@ func TestNewReader_MultipleReadersLargeInput(t *testing.T) {
 	assert.Equal(t, readersCount*linesPerReader, pr.RowsRead())
 }
 
-func TestNewReader_WithContext(t *testing.T) {
+func TestConcurrentLineProcessor_WithContext(t *testing.T) {
 	t.Run("context timeout", func(t *testing.T) {
 		// Create a large input that takes time to process
 		const lines = 1000000
@@ -354,6 +355,198 @@ func TestNewReader_WithContext(t *testing.T) {
 		assert.Equal(t, int64(3), metrics.RowsRead)
 		assert.Equal(t, int64(3), metrics.RowsWritten)
 	})
+}
+
+// Tests for WithCustomChunkProcessor
+
+func TestConcurrentLineProcessor_CustomChunkProcessor(t *testing.T) {
+	input := "line1\nline2\nline3\n"
+	r := newReadCloser(input)
+	pr := NewConcurrentLineProcessor(r, WithCustomChunkProcessor(func(chunk []byte, _ *ChunkDetails, w io.Writer) error {
+		// Transform entire chunk to uppercase
+		_, err := w.Write(bytes.ToUpper(chunk))
+		return err
+	}))
+	out, err := io.ReadAll(pr)
+	assert.NoError(t, err)
+	expected := "LINE1\nLINE2\nLINE3\n"
+	assert.Equal(t, expected, string(out))
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(3), metrics.RowsRead)
+	assert.Greater(t, metrics.BytesWritten, int64(0))
+}
+
+func TestConcurrentLineProcessor_ChunkProcessorAggregation(t *testing.T) {
+	// Test chunk processor that aggregates data within each chunk
+	input := "1\n2\n3\n4\n5\n"
+	r := newReadCloser(input)
+
+	pr := NewConcurrentLineProcessor(r, WithCustomChunkProcessor(func(chunk []byte, info *ChunkDetails, w io.Writer) error {
+		// Count lines in this chunk and write count
+		lineCount := bytes.Count(chunk, []byte("\n"))
+		_, err := w.Write([]byte(strconv.Itoa(lineCount)))
+		return err
+	}), WithWorkers(1)) // Single worker to ensure predictable output
+
+	out, err := io.ReadAll(pr)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, out)
+	// Output should contain the count (may have trailing newline from EnsureNewLineAtEnd)
+	assert.Contains(t, string(out), "5")
+}
+
+func TestConcurrentLineProcessor_ChunkProcessorSkipsOutput(t *testing.T) {
+	input := "data1\ndata2\ndata3\n"
+	r := newReadCloser(input)
+
+	pr := NewConcurrentLineProcessor(r, WithCustomChunkProcessor(func(chunk []byte, _ *ChunkDetails, w io.Writer) error {
+		return nil // intentionally skip output
+	}))
+
+	out, err := io.ReadAll(pr)
+	assert.NoError(t, err)
+	assert.Empty(t, out, "expected empty output when chunk processor writes nothing")
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(3), metrics.RowsRead)
+	assert.Equal(t, int64(0), metrics.RowsWritten)
+}
+
+func TestConcurrentLineProcessor_ChunkProcessorError(t *testing.T) {
+	input := "line1\nline2\nline3\n"
+	r := newReadCloser(input)
+	expectedErr := "chunk processing failed"
+
+	pr := NewConcurrentLineProcessor(r, WithCustomChunkProcessor(func(chunk []byte, _ *ChunkDetails, w io.Writer) error {
+		return errors.New(expectedErr)
+	}))
+
+	_, err := io.ReadAll(pr)
+	assert.Error(t, err)
+	assert.Equal(t, expectedErr, err.Error())
+}
+
+// Tests for ChunkDetails
+
+func TestConcurrentLineProcessor_ChunkDetailsInLineProcessor(t *testing.T) {
+	input := "a\nb\nc\n"
+	r := newReadCloser(input)
+
+	var receivedDetails []ChunkDetails
+	var mu sync.Mutex
+
+	pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(line []byte, info *ChunkDetails, w io.Writer) error {
+		mu.Lock()
+		receivedDetails = append(receivedDetails, ChunkDetails{
+			ReaderID: info.ReaderID,
+			ChunkID:  info.ChunkID,
+		})
+		mu.Unlock()
+		_, err := w.Write(line)
+		return err
+	}), WithWorkers(1)) // Single worker for predictable order
+
+	_, err := io.ReadAll(pr)
+	assert.NoError(t, err)
+
+	// Should have received 3 ChunkDetails (one per line)
+	assert.Len(t, receivedDetails, 3)
+
+	// All should have ChunkID 0 for single chunk, ReaderID 0 for first reader
+	for _, details := range receivedDetails {
+		assert.Equal(t, 0, details.ReaderID)
+		assert.GreaterOrEqual(t, details.ChunkID, 0)
+	}
+}
+
+func TestConcurrentLineProcessor_ChunkDetailsInChunkProcessor(t *testing.T) {
+	input := "chunk data here\n"
+	r := newReadCloser(input)
+
+	var receivedChunkID int
+	var receivedReaderID int
+
+	pr := NewConcurrentLineProcessor(r, WithCustomChunkProcessor(func(chunk []byte, info *ChunkDetails, w io.Writer) error {
+		receivedChunkID = info.ChunkID
+		receivedReaderID = info.ReaderID
+		_, err := w.Write(chunk)
+		return err
+	}))
+
+	_, err := io.ReadAll(pr)
+	assert.NoError(t, err)
+
+	assert.Equal(t, 0, receivedReaderID, "first reader should have ReaderID 0")
+	assert.Equal(t, 0, receivedChunkID, "first chunk should have ChunkID 0")
+}
+
+func TestConcurrentLineProcessor_ChunkDetailsWithMultipleReaders(t *testing.T) {
+	r1 := newReadCloser("reader0:line1\nreader0:line2\n")
+	r2 := newReadCloser("reader1:line1\nreader1:line2\n")
+
+	readerIDsSeen := make(map[int]bool)
+	var mu sync.Mutex
+
+	pr := NewConcurrentLineProcessor(nil,
+		WithMultiReaders(r1, r2),
+		WithCustomLineProcessor(func(line []byte, info *ChunkDetails, w io.Writer) error {
+			mu.Lock()
+			readerIDsSeen[info.ReaderID] = true
+			mu.Unlock()
+			_, err := w.Write(line)
+			return err
+		}),
+	)
+
+	_, err := io.ReadAll(pr)
+	assert.NoError(t, err)
+
+	// Should have seen both reader IDs
+	assert.True(t, readerIDsSeen[0] || readerIDsSeen[1], "should have seen at least one reader ID")
+	assert.Len(t, readerIDsSeen, 2, "should have seen exactly 2 different reader IDs")
+}
+
+// Test Chunk.Write and Chunk.WriteByte methods
+
+func TestChunk_Write(t *testing.T) {
+	chunk := &Chunk{data: make([]byte, 10), endingPos: 0}
+
+	n, err := chunk.Write([]byte("hello"))
+	assert.NoError(t, err)
+	assert.Equal(t, 5, n)
+	assert.Equal(t, 5, chunk.endingPos)
+	assert.Equal(t, "hello", string(chunk.data[:chunk.endingPos]))
+}
+
+func TestChunk_WriteOverflow(t *testing.T) {
+	chunk := &Chunk{data: make([]byte, 5), endingPos: 0}
+
+	// Write more than capacity
+	n, err := chunk.Write([]byte("hello world"))
+	assert.NoError(t, err)
+	assert.Equal(t, 11, n)
+	assert.Equal(t, 11, chunk.endingPos)
+	assert.Equal(t, "hello world", string(chunk.data[:chunk.endingPos]))
+}
+
+func TestChunk_WriteByte(t *testing.T) {
+	chunk := &Chunk{data: make([]byte, 10), endingPos: 0}
+
+	err := chunk.WriteByte('X')
+	assert.NoError(t, err)
+	assert.Equal(t, 1, chunk.endingPos)
+	assert.Equal(t, byte('X'), chunk.data[0])
+}
+
+func TestChunk_WriteByteOverflow(t *testing.T) {
+	chunk := &Chunk{data: make([]byte, 1), endingPos: 1}
+
+	// Writing when at capacity should append
+	err := chunk.WriteByte('Y')
+	assert.NoError(t, err)
+	assert.Equal(t, 2, chunk.endingPos)
+	assert.Equal(t, byte('Y'), chunk.data[1])
 }
 
 func newReadCloser(input string) io.ReadCloser {
