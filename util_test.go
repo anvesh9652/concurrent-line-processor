@@ -1,11 +1,172 @@
 package concurrentlineprocessor
 
 import (
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestLines(t *testing.T) {
+	t.Run("empty input returns no lines", func(t *testing.T) {
+		var result [][]byte
+		for line := range Lines([]byte{}, false) {
+			result = append(result, line)
+		}
+		assert.Empty(t, result)
+	})
+
+	t.Run("early break stops iteration", func(t *testing.T) {
+		var result [][]byte
+		for line := range Lines([]byte("line1\nline2\nline3\nline4"), false) {
+			result = append(result, slices.Clone(line))
+			if len(result) == 2 {
+				break
+			}
+		}
+		assert.Len(t, result, 2)
+		assert.Equal(t, []byte("line1"), result[0])
+		assert.Equal(t, []byte("line2"), result[1])
+	})
+
+	t.Run("rawLine=false strips newlines", func(t *testing.T) {
+		t.Run("single line without newline", func(t *testing.T) {
+			var result [][]byte
+			for line := range Lines([]byte("hello"), false) {
+				result = append(result, slices.Clone(line))
+			}
+			assert.Len(t, result, 1)
+			assert.Equal(t, []byte("hello"), result[0])
+		})
+
+		t.Run("single line with newline stripped", func(t *testing.T) {
+			var result [][]byte
+			for line := range Lines([]byte("hello\n"), false) {
+				result = append(result, slices.Clone(line))
+			}
+			assert.Len(t, result, 1)
+			assert.Equal(t, []byte("hello"), result[0])
+		})
+
+		t.Run("multiple lines without trailing newline", func(t *testing.T) {
+			var result [][]byte
+			for line := range Lines([]byte("line1\nline2\nline3"), false) {
+				result = append(result, slices.Clone(line))
+			}
+			assert.Len(t, result, 3)
+			assert.Equal(t, []byte("line1"), result[0])
+			assert.Equal(t, []byte("line2"), result[1])
+			assert.Equal(t, []byte("line3"), result[2])
+		})
+
+		t.Run("multiple lines with trailing newline", func(t *testing.T) {
+			var result [][]byte
+			for line := range Lines([]byte("line1\nline2\nline3\n"), false) {
+				result = append(result, slices.Clone(line))
+			}
+			assert.Len(t, result, 3)
+			assert.Equal(t, []byte("line1"), result[0])
+			assert.Equal(t, []byte("line2"), result[1])
+			assert.Equal(t, []byte("line3"), result[2])
+		})
+
+		t.Run("empty lines are preserved", func(t *testing.T) {
+			var result [][]byte
+			for line := range Lines([]byte("line1\n\nline3"), false) {
+				result = append(result, slices.Clone(line))
+			}
+			assert.Len(t, result, 3)
+			assert.Equal(t, []byte("line1"), result[0])
+			assert.Equal(t, []byte(""), result[1])
+			assert.Equal(t, []byte("line3"), result[2])
+		})
+
+		t.Run("only newlines", func(t *testing.T) {
+			var result [][]byte
+			for line := range Lines([]byte("\n\n\n"), false) {
+				result = append(result, slices.Clone(line))
+			}
+			assert.Len(t, result, 3)
+			assert.Equal(t, []byte(""), result[0])
+			assert.Equal(t, []byte(""), result[1])
+			assert.Equal(t, []byte(""), result[2])
+		})
+
+		t.Run("single newline character", func(t *testing.T) {
+			var result [][]byte
+			for line := range Lines([]byte("\n"), false) {
+				result = append(result, slices.Clone(line))
+			}
+			assert.Len(t, result, 1)
+			assert.Equal(t, []byte(""), result[0])
+		})
+	})
+
+	t.Run("rawLine=true preserves newlines", func(t *testing.T) {
+		t.Run("single line with newline preserved", func(t *testing.T) {
+			var result [][]byte
+			for line := range Lines([]byte("hello\n"), true) {
+				result = append(result, slices.Clone(line))
+			}
+			assert.Len(t, result, 1)
+			assert.Equal(t, []byte("hello\n"), result[0])
+		})
+
+		t.Run("single line without trailing newline", func(t *testing.T) {
+			var result [][]byte
+			for line := range Lines([]byte("hello"), true) {
+				result = append(result, slices.Clone(line))
+			}
+			assert.Len(t, result, 1)
+			assert.Equal(t, []byte("hello"), result[0])
+		})
+
+		t.Run("multiple lines with trailing newline", func(t *testing.T) {
+			var result [][]byte
+			for line := range Lines([]byte("line1\nline2\nline3\n"), true) {
+				result = append(result, slices.Clone(line))
+			}
+			assert.Len(t, result, 3)
+			assert.Equal(t, []byte("line1\n"), result[0])
+			assert.Equal(t, []byte("line2\n"), result[1])
+			assert.Equal(t, []byte("line3\n"), result[2])
+		})
+
+		t.Run("multiple lines without trailing newline", func(t *testing.T) {
+			var result [][]byte
+			for line := range Lines([]byte("line1\nline2\nline3"), true) {
+				result = append(result, slices.Clone(line))
+			}
+			assert.Len(t, result, 3)
+			assert.Equal(t, []byte("line1\n"), result[0])
+			assert.Equal(t, []byte("line2\n"), result[1])
+			assert.Equal(t, []byte("line3"), result[2])
+		})
+
+		t.Run("empty lines are preserved with newlines", func(t *testing.T) {
+			var result [][]byte
+			for line := range Lines([]byte("line1\n\nline3\n"), true) {
+				result = append(result, slices.Clone(line))
+			}
+			assert.Len(t, result, 3)
+			assert.Equal(t, []byte("line1\n"), result[0])
+			assert.Equal(t, []byte("\n"), result[1])
+			assert.Equal(t, []byte("line3\n"), result[2])
+		})
+
+		t.Run("only newlines", func(t *testing.T) {
+			var result [][]byte
+			for line := range Lines([]byte("\n\n\n"), true) {
+				result = append(result, slices.Clone(line))
+			}
+			assert.Len(t, result, 3)
+			assert.Equal(t, []byte("\n"), result[0])
+			assert.Equal(t, []byte("\n"), result[1])
+			assert.Equal(t, []byte("\n"), result[2])
+		})
+	})
+}
 
 func TestIfNull(t *testing.T) {
 	t.Run("with nil pointer returns default", func(t *testing.T) {

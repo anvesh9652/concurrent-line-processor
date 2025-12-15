@@ -40,20 +40,25 @@ func IfNull[T any](org *T, def T) T {
 }
 
 // Lines returns an iterator over lines in the given byte slice.
-// Each yielded line does not include the trailing newline character.
+// Each yielded line does not include the trailing newline character if rawLine is false.
+// Otherwise it will have the trailing newline character.
 // Uses Go 1.23+ range-over-func iteration pattern.
-func Lines(l []byte) iter.Seq[[]byte] {
+func Lines(l []byte, rawLine bool) iter.Seq[[]byte] {
 	return func(yeild func([]byte) bool) {
-		var s int
+		var s, n int
 		for s < len(l) {
 			i := bytes.IndexByte(l[s:], '\n')
 			if i == -1 {
 				i = len(l) - s
+			} else if rawLine {
+				n = 1 // include the new line if caller wants trailing newline character
 			}
-			if !yeild(l[s : s+i : len(l)]) {
+
+			if !yeild(l[s : s+i+n : len(l)]) {
 				return
 			}
 			s += i + 1
+			n = 0
 		}
 	}
 }

@@ -2,7 +2,6 @@ package concurrentlineprocessor
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"os"
 	"path"
@@ -24,49 +23,60 @@ goos: darwin
 goarch: arm64
 pkg: github.com/anvesh9652/concurrent-line-processor
 cpu: Apple M1 Pro
-                                                         │  /dev/fd/11  │
-                                                         │    sec/op    │
-NormalReader/NormalReader-temp_example.csv-4               95.27µ ±  4%
-NormalReader/NormalReader-2024-06-04-details.jsonl-4       2.321m ± 10%
-NormalReader/NormalReader-usage_data_12m.json-4             3.695 ± 11%
-ParallelReader/ParallelReader-temp_example.csv-4           169.5µ ± 15%
-ParallelReader/ParallelReader-2024-06-04-details.jsonl-4   3.151m ±  9%
-ParallelReader/ParallelReader-usage_data_12m.json-4         3.923 ± 10%
-geomean                                                    10.94m
+                                                         │ ./tmp/benchmark_outs/base1.txt │
+                                                         │             sec/op             │
+NormalReader/temp_example.csv-4                                  99.47µ ± 8%
+NormalReader/2024-06-04-details.jsonl-4                          2.438m ± 4%
+NormalReader/usage_data_12m.json-4                                3.540 ± 2%
+ParallelReader/temp_example.csv-4                              160.3µ ± 3%
+ParallelReader/2024-06-04-details.jsonl-4                      2.714m ± 8%
+ParallelReader/usage_data_12m.json-4                            3.684 ± 1%
+geomean                                                                       10.55m
 
-                                                         │  /dev/fd/11   │
-                                                         │     B/op      │
-NormalReader/NormalReader-temp_example.csv-4                 288.0 ±  0%
-NormalReader/NormalReader-2024-06-04-details.jsonl-4         289.0 ±  1%
-NormalReader/NormalReader-usage_data_12m.json-4            4.559Ki ± 88%
-ParallelReader/ParallelReader-temp_example.csv-4           253.3Ki ±  1%
-ParallelReader/ParallelReader-2024-06-04-details.jsonl-4   1.813Mi ±  7%
-ParallelReader/ParallelReader-usage_data_12m.json-4        18.14Mi ± 26%
-geomean                                                    38.31Ki
+                                                         │ ./tmp/benchmark_outs/base1.txt │
+                                                         │              B/s               │
+NormalReader/temp_example.csv-4                                 24.72Mi ± 9%
+NormalReader/2024-06-04-details.jsonl-4                         6.213Gi ± 5%
+NormalReader/usage_data_12m.json-4                              4.521Gi ± 2%
+ParallelReader/temp_example.csv-4                             15.33Mi ± 3%
+ParallelReader/2024-06-04-details.jsonl-4                     5.579Gi ± 7%
+ParallelReader/usage_data_12m.json-4                          4.344Gi ± 1%
+geomean                                                                      810.5Mi
 
-                                                         │ /dev/fd/11  │
-                                                         │  allocs/op  │
-NormalReader/NormalReader-temp_example.csv-4               5.000 ± 20%
-NormalReader/NormalReader-2024-06-04-details.jsonl-4       5.000 ± 20%
-NormalReader/NormalReader-usage_data_12m.json-4            8.000 ± 12%
-ParallelReader/ParallelReader-temp_example.csv-4           66.00 ±  0%
-ParallelReader/ParallelReader-2024-06-04-details.jsonl-4   108.0 ±  4%
-ParallelReader/ParallelReader-usage_data_12m.json-4        588.0 ± 23%
-geomean                                                    30.71
+                                                         │ ./tmp/benchmark_outs/base1.txt │
+                                                         │              B/op              │
+NormalReader/temp_example.csv-4                                 224.0 ±   0%
+NormalReader/2024-06-04-details.jsonl-4                         225.5 ±   2%
+NormalReader/usage_data_12m.json-4                              436.0 ± 942%
+ParallelReader/temp_example.csv-4                           252.0Ki ±   0%
+ParallelReader/2024-06-04-details.jsonl-4                   1.708Mi ±   6%
+ParallelReader/usage_data_12m.json-4                        5.370Mi ± 112%
+geomean                                                                    19.18Ki
+
+                                                         │ ./tmp/benchmark_outs/base1.txt │
+                                                         │           allocs/op            │
+NormalReader/temp_example.csv-4                                  4.000 ±  0%
+NormalReader/2024-06-04-details.jsonl-4                          4.000 ±  0%
+NormalReader/usage_data_12m.json-4                               5.000 ± 20%
+ParallelReader/temp_example.csv-4                              67.00 ±  0%
+ParallelReader/2024-06-04-details.jsonl-4                      106.5 ±  3%
+ParallelReader/usage_data_12m.json-4                           244.0 ± 71%
+geomean                                                                       22.77
+
 */
 
 func BenchmarkNormalReader(b *testing.B) {
 	for _, f := range files {
 		_, name := path.Split(f)
-		b.Run(fmt.Sprintf("NormalReader-%s", name), func(b *testing.B) {
+		b.Run(name, func(b *testing.B) {
 			reportFileSize(b, f)
 			for b.Loop() {
 				r, err := os.Open(f)
 				require.NoError(b, err)
-				defer r.Close()
 
 				_, err = io.Copy(io.Discard, r)
 				require.NoError(b, err)
+				require.NoError(b, r.Close())
 			}
 		})
 	}
@@ -75,7 +85,7 @@ func BenchmarkNormalReader(b *testing.B) {
 func BenchmarkParallelReader(b *testing.B) {
 	for _, f := range files {
 		_, name := path.Split(f)
-		b.Run(fmt.Sprintf("ParallelReader-%s", name), func(b *testing.B) {
+		b.Run(name, func(b *testing.B) {
 			reportFileSize(b, f)
 			for b.Loop() {
 				r, err := os.Open(f)
@@ -100,46 +110,56 @@ goos: darwin
 goarch: arm64
 pkg: github.com/anvesh9652/concurrent-line-processor
 cpu: Apple M1 Pro
-                                                                                              │  /dev/fd/11  │
-                                                                                              │    sec/op    │
-UppercaseTransform_NormalWay/NormalWay-temp_example.csv-4                                       105.5µ ±  6%
-UppercaseTransform_NormalWay/NormalWay-2024-06-04-details.jsonl-4                               15.52m ±  3%
-UppercaseTransform_NormalWay/NormalWay-usage_data_12m.json-4                                     19.30 ±  3%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-temp_example.csv-4           162.8µ ± 18%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-2024-06-04-details.jsonl-4   5.923m ±  3%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-usage_data_12m.json-4         5.150 ±  2%
-geomean                                                                                         23.22m
+                                                                                              │ ./tmp/benchmark_outs/upper1.txt │
+                                                                                              │             sec/op              │
+UppercaseTransform_NormalWay/temp_example.csv-4                                                          97.69µ ±  3%
+UppercaseTransform_NormalWay/2024-06-04-details.jsonl-4                                                  15.62m ±  5%
+UppercaseTransform_NormalWay/usage_data_12m.json-4                                                        18.30 ±  2%
+UppercaseTransform_ConcurrentLineProcessor/temp_example.csv-4                              155.9µ ± 10%
+UppercaseTransform_ConcurrentLineProcessor/2024-06-04-details.jsonl-4                      5.736m ± 10%
+UppercaseTransform_ConcurrentLineProcessor/usage_data_12m.json-4                            5.097 ±  3%
+geomean                                                                                                            22.43m
 
-                                                                                              │  /dev/fd/11  │
-                                                                                              │     B/op     │
-UppercaseTransform_NormalWay/NormalWay-temp_example.csv-4                                       4.376Ki ± 0%
-UppercaseTransform_NormalWay/NormalWay-2024-06-04-details.jsonl-4                               16.59Ki ± 0%
-UppercaseTransform_NormalWay/NormalWay-usage_data_12m.json-4                                    11.97Mi ± 0%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-temp_example.csv-4           258.1Ki ± 0%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-2024-06-04-details.jsonl-4   18.72Mi ± 1%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-usage_data_12m.json-4        22.95Mi ± 0%
-geomean                                                                                         685.2Ki
+                                                                                              │ ./tmp/benchmark_outs/upper1.txt │
+                                                                                              │               B/s               │
+UppercaseTransform_NormalWay/temp_example.csv-4                                                          25.15Mi ± 3%
+UppercaseTransform_NormalWay/2024-06-04-details.jsonl-4                                                  993.0Mi ± 5%
+UppercaseTransform_NormalWay/usage_data_12m.json-4                                                       895.4Mi ± 2%
+UppercaseTransform_ConcurrentLineProcessor/temp_example.csv-4                              15.76Mi ± 9%
+UppercaseTransform_ConcurrentLineProcessor/2024-06-04-details.jsonl-4                      2.640Gi ± 9%
+UppercaseTransform_ConcurrentLineProcessor/usage_data_12m.json-4                           3.140Gi ± 3%
+geomean                                                                                                            381.1Mi
 
-                                                                                              │ /dev/fd/11  │
-                                                                                              │  allocs/op  │
-UppercaseTransform_NormalWay/NormalWay-temp_example.csv-4                                        46.00 ± 0%
-UppercaseTransform_NormalWay/NormalWay-2024-06-04-details.jsonl-4                               12.56k ± 0%
-UppercaseTransform_NormalWay/NormalWay-usage_data_12m.json-4                                    12.55M ± 0%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-temp_example.csv-4            66.00 ± 0%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-2024-06-04-details.jsonl-4    476.0 ± 1%
-UppercaseTransform_ConcurrentLineProcessor/ConcurrentLineProcessor-usage_data_12m.json-4         653.0 ± 4%
-geomean                                                                                         2.302k
+                                                                                              │ ./tmp/benchmark_outs/upper1.txt │
+                                                                                              │              B/op               │
+UppercaseTransform_NormalWay/temp_example.csv-4                                                          4.376Ki ± 0%
+UppercaseTransform_NormalWay/2024-06-04-details.jsonl-4                                                  16.59Ki ± 0%
+UppercaseTransform_NormalWay/usage_data_12m.json-4                                                       11.97Mi ± 0%
+UppercaseTransform_ConcurrentLineProcessor/temp_example.csv-4                              257.3Ki ± 0%
+UppercaseTransform_ConcurrentLineProcessor/2024-06-04-details.jsonl-4                      18.75Mi ± 2%
+UppercaseTransform_ConcurrentLineProcessor/usage_data_12m.json-4                           22.86Mi ± 1%
+geomean                                                                                                            684.6Ki
+
+                                                                                              │ ./tmp/benchmark_outs/upper1.txt │
+                                                                                              │            allocs/op            │
+UppercaseTransform_NormalWay/temp_example.csv-4                                                            46.00 ± 0%
+UppercaseTransform_NormalWay/2024-06-04-details.jsonl-4                                                   12.56k ± 0%
+UppercaseTransform_NormalWay/usage_data_12m.json-4                                                        12.55M ± 0%
+UppercaseTransform_ConcurrentLineProcessor/temp_example.csv-4                                67.00 ± 0%
+UppercaseTransform_ConcurrentLineProcessor/2024-06-04-details.jsonl-4                        478.0 ± 1%
+UppercaseTransform_ConcurrentLineProcessor/usage_data_12m.json-4                             631.5 ± 3%
+geomean                                                                                                             2.296k
+
 */
 
 func BenchmarkUppercaseTransform_NormalWay(b *testing.B) {
 	for _, f := range files {
 		_, name := path.Split(f)
-		b.Run(fmt.Sprintf("NormalWay-%s", name), func(b *testing.B) {
+		b.Run(name, func(b *testing.B) {
 			reportFileSize(b, f)
 			for b.Loop() {
 				r, err := os.Open(f)
 				require.NoError(b, err)
-				defer r.Close()
 
 				w := io.Discard
 				scanner := bufio.NewScanner(r)
@@ -150,6 +170,7 @@ func BenchmarkUppercaseTransform_NormalWay(b *testing.B) {
 					_, _ = w.Write([]byte{'\n'})
 				}
 				require.NoError(b, scanner.Err())
+				require.NoError(b, r.Close())
 			}
 		})
 	}
@@ -158,7 +179,7 @@ func BenchmarkUppercaseTransform_NormalWay(b *testing.B) {
 func BenchmarkUppercaseTransform_ConcurrentLineProcessor(b *testing.B) {
 	for _, f := range files {
 		_, name := path.Split(f)
-		b.Run(fmt.Sprintf("ConcurrentLineProcessor-%s", name), func(b *testing.B) {
+		b.Run(name, func(b *testing.B) {
 			reportFileSize(b, f)
 			for b.Loop() {
 				r, err := os.Open(f)

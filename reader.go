@@ -343,7 +343,7 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 		}
 		EnsureNewLineAtEnd(resChunk)
 	} else {
-		for line := range Lines(chunk.data[:chunk.endingPos]) {
+		for line := range Lines(chunk.data[:chunk.endingPos], false) {
 			if err := p.customDataProcessor(line, chunkDetails, resChunk); err != nil {
 				p.putChunkToPool(resChunk)
 				return err
@@ -436,20 +436,14 @@ func trimmedBuff(buff []byte, readLimit, currLinesRead int) (int, int) {
 		return 0, 0
 	}
 
-	searchArea := buff
-	var linesFound, buffLen, ind int
-	for {
-		ind = bytes.IndexByte(searchArea, '\n')
-		if ind == -1 {
-			break
-		}
+	var linesFound, buffLen int
+	for line := range Lines(buff, true) {
 		linesFound++
-		buffLen += ind + 1
+		buffLen += len(line)
+
 		if linesFound >= linesNeeded {
-			// the buff includes new line at the end
 			return buffLen, linesFound
 		}
-		searchArea = searchArea[ind+1:]
 	}
 	// If not enough newlines were found, the whole buffer is used.
 	return len(buff), linesFound
