@@ -81,7 +81,7 @@ func BenchmarkParallelReader(b *testing.B) {
 				r, err := os.Open(f)
 				require.NoError(b, err)
 
-				pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(line []byte, _ *LineDetails, w io.Writer) error {
+				pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(line []byte, _ *ChunkDetails, w io.Writer) error {
 					_, err := w.Write(line)
 					return err
 				}), WithWorkers(5))
@@ -164,7 +164,7 @@ func BenchmarkUppercaseTransform_ConcurrentLineProcessor(b *testing.B) {
 				r, err := os.Open(f)
 				require.NoError(b, err)
 
-				pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(line []byte, _ *LineDetails, w io.Writer) error {
+				pr := NewConcurrentLineProcessor(r, WithCustomLineProcessor(func(line []byte, _ *ChunkDetails, w io.Writer) error {
 					toUpperASCII(line)
 					_, err := w.Write(line)
 					return err

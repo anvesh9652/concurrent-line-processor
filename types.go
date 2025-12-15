@@ -15,10 +15,11 @@ type (
 	// Options are passed to NewConcurrentLineProcessor to customize behavior.
 	Option func(*concurrentLineProcessor)
 
-	// LineProcessor is a function type for processing individual lines.
-	// It receives a line as []byte and info and then returns the processed line and any error.
+	// DataProcessor is a function type for processing individual lines/chunks.
+	// It receives a line/chunk as []byte and info and then the processed line/chunk should be written out
+	// return any error.
 	// Implementations must be thread-safe as they may be called concurrently.
-	LineProcessor func(b []byte, info *LineDetails, out io.Writer) error
+	DataProcessor func(b []byte, info *ChunkDetails, out io.Writer) error
 )
 
 // Chunk represents a piece of data to be processed, containing an ID for ordering
@@ -36,9 +37,9 @@ type Chunk struct {
 	rowsWritten int64
 }
 
-// LineDetails provides contextual information about a line being processed.
+// ChunkDetails provides contextual information about a line being processed.
 // All the fields follow zero-based indexing.
-type LineDetails struct {
+type ChunkDetails struct {
 	// ReaderID is the ID of the source reader from which this line was read.
 	ReaderID int
 	// ChunkID is the ID of the chunk which we have read from the source reader.
@@ -64,17 +65,17 @@ type Metrics struct {
 // of large files or streams. It implements io.Reader, allowing processed data to be
 // read using standard Go I/O patterns.
 type concurrentLineProcessor struct {
-	chunkPool       sync.Pool
-	lineDetailsPool sync.Pool
+	chunkPool        sync.Pool
+	chunkDetailsPool sync.Pool
 
 	now time.Time
 
 	// ctx is the context for managing cancellation and timeouts.
 	ctx context.Context
 
-	// customLineProcessor allows you to process each line of the input data.
+	// customDataProcessor allows you to process each line of the input data.
 	// It is not thread-safe. You can't update anything outside of the function unless you use a mutex.
-	customLineProcessor LineProcessor
+	customDataProcessor DataProcessor
 
 	inStream  chan *Chunk
 	outStream chan *Chunk
@@ -98,9 +99,9 @@ type concurrentLineProcessor struct {
 	// rowsReadLimit is the limit on the number of rows to read. Default is -1, which means no limit.
 	rowsReadLimit int
 
-	// hasCustomLineProcessor indicates whether a custom line processor is set.
+	// isLineProcessor indicates whether a custom line processor is set.
 	// If true, the processor will use the customLineProcessor to process each line.
-	hasCustomLineProcessor bool
+	isLineProcessor *bool
 }
 
 // Implementation of io.Writer interface for any future use.

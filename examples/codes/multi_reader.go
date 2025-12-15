@@ -24,7 +24,7 @@ func MultiReaders(files []string) {
 		}
 		x = append(x, f)
 	}
-	lp := func(b []byte, _ *clp.LineDetails, w io.Writer) error {
+	lp := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
 		_, err := w.Write(b)
 		return err
 	}

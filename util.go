@@ -149,3 +149,7 @@ func Filter[T any](arr []T, keep func(T) bool) []T {
 	}
 	return result
 }
+
+func Ptr[T any](v T) *T {
+	return &v
+}

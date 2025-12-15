@@ -108,14 +108,9 @@ func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLine
 
 		pr: pr, pw: pw,
 		now: time.Now(),
-
-		customLineProcessor: func(b []byte, _ *LineDetails, w io.Writer) error {
-			_, err := w.Write(b)
-			return err
-		},
 	}, opts...)
 
-	p.lineDetailsPool = sync.Pool{New: func() any { return &LineDetails{} }}
+	p.chunkDetailsPool = sync.Pool{New: func() any { return &ChunkDetails{} }}
 	p.chunkPool = sync.Pool{
 		New: func() any {
 			return &Chunk{data: make([]byte, p.chunkSize)}
@@ -298,27 +293,38 @@ func (p *concurrentLineProcessor) processChunks(ctx context.Context) error {
 }
 
 func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk *Chunk) error {
-	if !p.hasCustomLineProcessor {
+	if p.isLineProcessor == nil || p.customDataProcessor == nil {
 		EnsureNewLineAtEnd(chunk)
 		chunk.rowsWritten += int64(bytes.Count(chunk.data[:chunk.endingPos], []byte("\n")))
 		return sendToStream(ctx, p.outStream, chunk)
 	}
 
-	lineDetails := p.lineDetailsPool.Get().(*LineDetails)
+	var (
+		chunkDetails = p.chunkDetailsPool.Get().(*ChunkDetails)
+		data         = chunk.data[:chunk.endingPos]
+	)
 
 	// put the original chunk data back to the pool
 	defer p.putChunkToPool(chunk)
-	defer p.lineDetailsPool.Put(lineDetails)
+	defer p.chunkDetailsPool.Put(chunkDetails)
 
-	lineDetails.ChunkID, lineDetails.ReaderID = chunk.id, chunk.readerID
+	chunkDetails.ChunkID, chunkDetails.ReaderID = chunk.id, chunk.readerID
 	resChunk := p.newChunkFromPool(chunk.id, chunk.readerID)
 
-	for line := range Lines(chunk.data[:chunk.endingPos]) {
-		if err := p.customLineProcessor(line, lineDetails, resChunk); err != nil {
+	if !*p.isLineProcessor {
+		if err := p.customDataProcessor(data, chunkDetails, resChunk); err != nil {
 			p.putChunkToPool(resChunk)
 			return err
 		}
 		EnsureNewLineAtEnd(resChunk)
+	} else {
+		for line := range Lines(chunk.data[:chunk.endingPos]) {
+			if err := p.customDataProcessor(line, chunkDetails, resChunk); err != nil {
+				p.putChunkToPool(resChunk)
+				return err
+			}
+			EnsureNewLineAtEnd(resChunk)
+		}
 	}
 
 	// Learning: writing each line to the output stream one by one drastically worse the performance

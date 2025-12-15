@@ -42,13 +42,22 @@ func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 		mu   sync.Mutex
 		keys = make(map[string]struct{})
 	)
-	customProcessor := func(b []byte, _ *clp.LineDetails, w io.Writer) error {
+
+	customProcessor := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
 		var d map[string]any
-		if err := json.Unmarshal(b, &d); err != nil {
-			return err
+
+		local := make(map[string]struct{})
+		dec := json.NewDecoder(bytes.NewReader(b))
+		for dec.More() {
+			if err := dec.Decode(&d); err != nil {
+				return err
+			}
+			for k := range d {
+				local[k] = struct{}{}
+			}
 		}
 		mu.Lock()
-		for k := range d {
+		for k := range local {
 			keys[k] = struct{}{}
 		}
 		mu.Unlock()
@@ -58,7 +67,7 @@ func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 
 	nr := clp.NewConcurrentLineProcessor(r,
 		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers), clp.WithRowsReadLimit(rowsLimit),
-		clp.WithCustomLineProcessor(customProcessor),
+		clp.WithCustomChunkProcessor(customProcessor),
 	)
 	if _, err := io.Copy(io.Discard, nr); err != nil {
 		return nil, err
@@ -67,13 +76,13 @@ func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 	for k := range keys {
 		columns = append(columns, k)
 	}
-	// fmt.Println(nr.Summary())
+	fmt.Println(nr.Summary())
 	return columns, nil
 }
 
 // These functions can be reusalbe outside of this package
 func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
-	customProcessor := func(b []byte, _ *clp.LineDetails, w io.Writer) error {
+	customProcessor := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
 		// return handleLineNormalWay(b, columns, w.(io.ByteWriter))
 		return hanldeLineWithParser(b, columns, w.(io.ByteWriter))
 	}
@@ -88,7 +97,7 @@ func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
 	}
 
 	_, err := io.Copy(w, nr)
-	// fmt.Println(nr.Summary())
+	fmt.Println(nr.Summary())
 	return err
 }
 
@@ -98,7 +107,7 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 		return err
 	}
 
-	customProcessor := func(b []byte, _ *clp.LineDetails, w io.Writer) error {
+	customProcessor := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
 		// return handleLineNormalWay(b, columns, w.(io.ByteWriter))
 		return hanldeLineWithParser(b, columns, w.(io.ByteWriter))
 	}
@@ -114,7 +123,7 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 	}
 
 	_, err = io.Copy(w, nr)
-	// fmt.Println(nr.Summary())
+	fmt.Println(nr.Summary())
 	return err
 }
 

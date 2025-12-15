@@ -55,13 +55,36 @@ func WithWorkers(n int) Option {
 //	    return bytes.ToUpper(line), nil
 //	}
 //	clp.NewConcurrentLineProcessor(reader, clp.WithCustomLineProcessor(processor))
-func WithCustomLineProcessor(c LineProcessor) Option {
+func WithCustomLineProcessor(c DataProcessor) Option {
 	return func(pr *concurrentLineProcessor) {
 		if c == nil {
 			return
 		}
-		pr.hasCustomLineProcessor = true
-		pr.customLineProcessor = c
+		pr.isLineProcessor = Ptr(true)
+		pr.customDataProcessor = c
+	}
+}
+
+
+// WithCustomChunkProcessor sets a custom function to process each chunk.
+// The function receives a chunk as []byte and should return the processed chunk.
+// The function must be thread-safe and should not modify external state
+// without proper synchronization.
+//
+// Example:
+//
+//	// Convert entire chunk to uppercase
+//	processor := func(chunk []byte) ([]byte, error) {
+//	    return bytes.ToUpper(chunk), nil
+//	}
+//	clp.NewConcurrentLineProcessor(reader, clp.WithCustomChunkProcessor(processor))
+func WithCustomChunkProcessor(c DataProcessor) Option {
+	return func(pr *concurrentLineProcessor) {
+		if c == nil {
+			return
+		}
+		pr.isLineProcessor = Ptr(false)
+		pr.customDataProcessor = c
 	}
 }
 
