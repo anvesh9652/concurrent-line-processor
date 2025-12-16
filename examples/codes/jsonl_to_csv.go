@@ -114,7 +114,7 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 
 	nr := clp.NewConcurrentLineProcessor(r,
 		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers),
-		clp.WithMultiReaders(readers...),
+		clp.WithReaders(readers...),
 		clp.WithCustomLineProcessor(customProcessor),
 	)
 

@@ -207,7 +207,7 @@ func TestConcurrentLineProcessor_SmallChunkSize_OrderNotGuaranteed(t *testing.T)
 func TestConcurrentLineProcessor_MultipleReaders(t *testing.T) {
 	r1 := newReadCloser("alpha\nbeta\n")
 	r2 := newReadCloser("gamma\ndelta\n")
-	pr := NewConcurrentLineProcessor(nil, WithMultiReaders(r1, r2))
+	pr := NewConcurrentLineProcessor(nil, WithReaders(r1, r2))
 	out, err := io.ReadAll(pr)
 	assert.NoError(t, err)
 
@@ -250,7 +250,7 @@ func TestConcurrentLineProcessor_MultipleReadersLargeInput(t *testing.T) {
 		readers = append(readers, newReadCloser(buildReaderData(prefix, linesPerReader)))
 		expectedCounts[prefix] = linesPerReader
 	}
-	pr := NewConcurrentLineProcessor(nil, WithMultiReaders(readers...), WithWorkers(4))
+	pr := NewConcurrentLineProcessor(nil, WithReaders(readers...), WithWorkers(4))
 	defer pr.Close()
 	out, err := io.ReadAll(pr)
 	assert.NoError(t, err)
@@ -489,7 +489,7 @@ func TestConcurrentLineProcessor_ChunkDetailsWithMultipleReaders(t *testing.T) {
 	var mu sync.Mutex
 
 	pr := NewConcurrentLineProcessor(nil,
-		WithMultiReaders(r1, r2),
+		WithReaders(r1, r2),
 		WithCustomLineProcessor(func(line []byte, info *ChunkDetails, w io.Writer) error {
 			mu.Lock()
 			readerIDsSeen[info.ReaderID] = true

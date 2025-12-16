@@ -6,11 +6,15 @@ import (
 
 	clp "github.com/anvesh9652/concurrent-line-processor"
 	. "github.com/anvesh9652/concurrent-line-processor/examples/codes"
-	"github.com/anvesh9652/concurrent-line-processor/profiling"
+	"github.com/pkg/profile"
 )
 
 func main() {
-	profiling.WithProfiling(start)
+	dir := "./profiling"
+	// defer profile.Start(profile.CPUProfile, profile.ProfilePath(dir)).Stop()
+	defer profile.Start(profile.MemProfile, profile.ProfilePath(dir), profile.MemProfileRate(1)).Stop()
+
+	start()
 }
 
 func start() {
