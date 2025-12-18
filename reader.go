@@ -244,7 +244,7 @@ func (p *concurrentLineProcessor) readAsChunks(ctx context.Context) error {
 
 func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int, r io.ReadCloser) error {
 	var (
-		chunkID, linesToUpdate, rr int
+		chunkID, linesToUpdate int
 
 		leftOver = make([]byte, 0, maxLineLength)
 		currBuff = p.newChunkFromPool(-1, -1) // temporary buffer for reading
@@ -252,7 +252,7 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 	defer p.putChunkToPool(currBuff)
 
 	for {
-		if rr = p.RowsRead(); p.rowsReadLimit != -1 && rr >= p.rowsReadLimit { // If rowsReadLimit is set, check if it has been reached
+		if p.rowsReadLimit != -1 && p.RowsRead() >= p.rowsReadLimit { // If rowsReadLimit is set, check if it has been reached
 			break
 		}
 
@@ -274,10 +274,10 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 		}
 
 		_, _ = chunk.Write(currBuff.data[:read])
-		chunk.endingPos, linesToUpdate = trimmedBuff(chunk.data[:chunk.endingPos], p.rowsReadLimit, rr)
+		chunk.endingPos, linesToUpdate = p.trimmedBuff(chunk.data[:chunk.endingPos])
 		atomic.AddInt64(&p.metrics.BytesRead, int64(read))
 
-		if p.isLimitReached(chunk, int64(linesToUpdate)) {
+		if p.isLimitReached(chunk, linesToUpdate) {
 			p.putChunkToPool(chunk)
 			break
 		}
@@ -430,16 +430,23 @@ func sendToStream(ctx context.Context, ch chan *Chunk, chunk *Chunk) error {
 	return nil
 }
 
-func trimmedBuff(buff []byte, readLimit, currLinesRead int) (int, int) {
-	newLinesCnt := bytes.Count(buff, []byte{'\n'})
-	linesNeeded := newLinesCnt
-	if readLimit != -1 {
-		linesNeeded = readLimit - currLinesRead
-	}
-	if linesNeeded >= newLinesCnt {
-		return len(buff), newLinesCnt
+func (p *concurrentLineProcessor) trimmedBuff(buff []byte) (int, int) {
+	buffLinesCnt := bytes.Count(buff, []byte{'\n'})
+	if p.rowsReadLimit == -1 {
+		return len(buff), buffLinesCnt
 	}
 
+	currLinesRead, linesNeeded := p.RowsRead(), buffLinesCnt
+	if p.rowsReadLimit != -1 {
+		linesNeeded = p.rowsReadLimit - currLinesRead
+	}
+
+	// Entire buff it self doesn't have enough lines we need
+	if linesNeeded >= buffLinesCnt {
+		return len(buff), buffLinesCnt
+	}
+
+	// We already read the row till limit. we no longer need anything from this buff
 	if linesNeeded <= 0 {
 		return 0, 0
 	}
@@ -450,11 +457,10 @@ func trimmedBuff(buff []byte, readLimit, currLinesRead int) (int, int) {
 		buffLen += len(line)
 
 		if linesFound >= linesNeeded {
-			return buffLen, linesFound
+			break
 		}
 	}
-	// If not enough newlines were found, the whole buffer is used.
-	return len(buff), linesFound
+	return buffLen, linesFound
 }
 
 func (p *concurrentLineProcessor) newChunkFromPool(chunkID, readerID int) *Chunk {
@@ -466,32 +472,31 @@ func (p *concurrentLineProcessor) newChunkFromPool(chunkID, readerID int) *Chunk
 	return chunk
 }
 
-// Tells whether to proceed or not
-func (p *concurrentLineProcessor) isLimitReached(chunk *Chunk, linesToUpdate int64) bool {
-	val := int(atomic.AddInt64(&p.metrics.RowsRead, linesToUpdate))
+// Tells whether to proceed or not upon reaching limit
+func (p *concurrentLineProcessor) isLimitReached(chunk *Chunk, linesToUpdate int) bool {
+	if linesToUpdate == 0 {
+		return true
+	}
+	val := int(atomic.AddInt64(&p.metrics.RowsRead, int64(linesToUpdate)))
 	if p.rowsReadLimit == -1 || val <= p.rowsReadLimit {
 		return false
 	}
 
-	if val-int(linesToUpdate) >= p.rowsReadLimit {
-		atomic.AddInt64(&p.metrics.RowsRead, -linesToUpdate)
+	if val-linesToUpdate >= p.rowsReadLimit {
+		atomic.AddInt64(&p.metrics.RowsRead, -int64(linesToUpdate))
 		return true
 	}
-	// 3 - (4 - 3)
-	//   i l v
-	// 1 2 3 4
 	// Here we kind of have overlap and
 	// we need to remove exces lines, which might have been added by other readHandler
 	var till, c int
 	for line := range Lines(chunk.data[:chunk.endingPos], true) {
 		till, c = till+len(line), c+1
-		if c == int(linesToUpdate)-(val-p.rowsReadLimit) { // 3 - (4 - 3)
+		if c == linesToUpdate-(val-p.rowsReadLimit) {
 			break
 		}
 	}
 
 	atomic.SwapInt64(&p.metrics.RowsRead, int64(p.rowsReadLimit))
-	// atomic.AddInt64(&p.metrics.RowsRead, -int64(val-p.rowsReadLimit))
 	chunk.endingPos = till
 	return false
 }
