@@ -57,8 +57,7 @@ func Lines(l []byte, rawLine bool) iter.Seq[[]byte] {
 			if !yeild(l[s : s+i+n : len(l)]) {
 				return
 			}
-			s += i + 1
-			n = 0
+			s, n  = s +  i + 1, 0
 		}
 	}
 }

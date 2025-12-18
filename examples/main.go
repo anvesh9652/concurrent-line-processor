@@ -11,8 +11,8 @@ import (
 
 func main() {
 	dir := "./profiling"
-	// defer profile.Start(profile.CPUProfile, profile.ProfilePath(dir)).Stop()
-	defer profile.Start(profile.MemProfile, profile.ProfilePath(dir), profile.MemProfileRate(1)).Stop()
+	defer profile.Start(profile.CPUProfile, profile.ProfilePath(dir), profile.Quiet).Stop()
+	// defer profile.Start(profile.MemProfile, profile.ProfilePath(dir), profile.MemProfileRate(1)).Stop()
 
 	start()
 }

@@ -119,6 +119,8 @@ var (
 //	if err != nil {
 //		log.Fatal(err)
 //	}
+var times int64
+
 func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLineProcessor {
 	pr, pw := io.Pipe()
 
@@ -138,6 +140,7 @@ func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLine
 	p.chunkDetailsPool = sync.Pool{New: func() any { return &ChunkDetails{} }}
 	p.chunkPool = sync.Pool{
 		New: func() any {
+			atomic.AddInt64(&times, 1)
 			return &Chunk{data: make([]byte, p.chunkSize)}
 		},
 	}
@@ -164,6 +167,7 @@ func (p *concurrentLineProcessor) Close() (retErr error) {
 	if err := p.pr.Close(); err != nil {
 		retErr = errors.Join(retErr, err)
 	}
+	// fmt.Println("new chunks:", times)
 	return
 }
 
@@ -271,8 +275,12 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 
 		_, _ = chunk.Write(currBuff.data[:read])
 		chunk.endingPos, linesToUpdate = trimmedBuff(chunk.data[:chunk.endingPos], p.rowsReadLimit, rr)
-		atomic.AddInt64(&p.metrics.RowsRead, int64(linesToUpdate))
 		atomic.AddInt64(&p.metrics.BytesRead, int64(read))
+
+		if p.isLimitReached(chunk, int64(linesToUpdate)) {
+			p.putChunkToPool(chunk)
+			break
+		}
 
 		ind := bytes.LastIndex(chunk.data[:chunk.endingPos], []byte{'\n'})
 		if ind == -1 {
@@ -456,4 +464,34 @@ func (p *concurrentLineProcessor) newChunkFromPool(chunkID, readerID int) *Chunk
 	chunk.data = chunk.data[:p.chunkSize]
 	chunk.id, chunk.readerID, chunk.endingPos, chunk.rowsWritten = chunkID, readerID, 0, 0
 	return chunk
+}
+
+// Tells whether to proceed or not
+func (p *concurrentLineProcessor) isLimitReached(chunk *Chunk, linesToUpdate int64) bool {
+	val := int(atomic.AddInt64(&p.metrics.RowsRead, linesToUpdate))
+	if p.rowsReadLimit == -1 || val <= p.rowsReadLimit {
+		return false
+	}
+
+	if val-int(linesToUpdate) >= p.rowsReadLimit {
+		atomic.AddInt64(&p.metrics.RowsRead, -linesToUpdate)
+		return true
+	}
+	// 3 - (4 - 3)
+	//   i l v
+	// 1 2 3 4
+	// Here we kind of have overlap and
+	// we need to remove exces lines, which might have been added by other readHandler
+	var till, c int
+	for line := range Lines(chunk.data[:chunk.endingPos], true) {
+		till, c = till+len(line), c+1
+		if c == int(linesToUpdate)-(val-p.rowsReadLimit) { // 3 - (4 - 3)
+			break
+		}
+	}
+
+	atomic.SwapInt64(&p.metrics.RowsRead, int64(p.rowsReadLimit))
+	// atomic.AddInt64(&p.metrics.RowsRead, -int64(val-p.rowsReadLimit))
+	chunk.endingPos = till
+	return false
 }

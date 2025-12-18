@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	clp "github.com/anvesh9652/concurrent-line-processor"
 	"github.com/valyala/fastjson"
@@ -20,14 +21,10 @@ var parserPool = fastjson.ParserPool{}
 func InitConvertJtoC(file string) {
 	f, err := os.Open(file)
 	clp.ExitOnError(err)
-	defer f.Close()
 
-	// cols, err := GetAllKeys(f, -1)
+	// cols, err := GetAllKeys(f, 4)
 	// clp.ExitOnError(err)
-
-	f, err = os.Open(file)
-	clp.ExitOnError(err)
-	defer f.Close()
+	// _ = cols
 
 	tf, err := os.Create("/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/test_conv.csv")
 	clp.ExitOnError(err)
@@ -76,7 +73,7 @@ func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 	for k := range keys {
 		columns = append(columns, k)
 	}
-	// fmt.Println(nr.Summary())
+	fmt.Println(nr.Summary())
 	return columns, nil
 }
 
@@ -88,7 +85,7 @@ func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
-		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers), clp.WithRowsReadLimit(-1),
+		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers), clp.WithRowsReadLimit(10),
 		clp.WithCustomLineProcessor(customProcessor),
 	)
 
@@ -97,7 +94,7 @@ func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
 	}
 
 	_, err := io.Copy(w, nr)
-	// fmt.Println(nr.Summary())
+	fmt.Println(nr.Summary())
 	return err
 }
 
@@ -107,23 +104,39 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 		return err
 	}
 
+	var timesBigger int64
+	once := sync.Once{}
 	customProcessor := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
 		// return handleLineNormalWay(b, columns, w.(io.ByteWriter))
-		return hanldeLineWithParser(b, columns, w.(io.ByteWriter))
+
+		err := hanldeLineWithParser(b, columns, w.(io.ByteWriter))
+		c := w.(*clp.Chunk)
+		if len(b) > c.Size() {
+			atomic.AddInt64(&timesBigger, 1)
+			once.Do(func() {
+				fmt.Println("bigger chunk found:", len(b), ">", c.Size())
+				// fmt.Println("Json:", string(b))
+				// fmt.Println("CSV:", string(c.Data()))
+			})
+		}
+		return err
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
 		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers),
 		clp.WithReaders(readers...),
 		clp.WithCustomLineProcessor(customProcessor),
+		clp.WithRowsReadLimit(3),
 	)
+	defer nr.Close()
 
 	if _, err := w.Write([]byte(strings.Join(columns, ",") + "\n")); err != nil {
 		return err
 	}
 
 	_, err = io.Copy(w, nr)
-	// fmt.Println(nr.Summary())
+	fmt.Println(nr.Summary())
+	// fmt.Println("timeBigger:", timesBigger)
 	return err
 }
 
@@ -229,13 +242,27 @@ func hanldeLineWithParser(line []byte, cols []string, w io.ByteWriter) error {
 		if i > 0 {
 			w.WriteByte(',')
 		}
-		escapeFieldByte(v.Get(col).MarshalTo(nil), w)
-		// escapeFieldByte([]byte(v.Get(col).String()), w)
+
+		val := v.Get(col)
+		if val.Type() == fastjson.TypeString {
+			escapeFieldByte(v.GetStringBytes(col), w)
+			continue
+		}
+
+		// escapeFieldByte(v.GetStringBytes(col), w)
+		escapeFieldByte(val.MarshalTo(nil), w)
 	}
 	return nil
 }
 
 func escapeFieldByte(field []byte, dst io.ByteWriter) {
+	if bytes.IndexByte(field, '"') == -1 {
+		for _, c := range field {
+			dst.WriteByte(c)
+		}
+		return
+	}
+
 	dst.WriteByte('"')
 	for _, c := range field {
 		if c == '"' { // escape quotes by doubling

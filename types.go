@@ -7,6 +7,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -137,12 +138,15 @@ type concurrentLineProcessor struct {
 	isLineProcessor *bool
 }
 
+var app int64
+
 // Write implements io.Writer, appending src to the chunk's data buffer.
 // It uses copy for efficiency when possible, falling back to append for overflow.
 // The endingPos is updated to reflect the new data boundary.
 func (chunk *Chunk) Write(src []byte) (int, error) {
 	start := chunk.endingPos
 	if copied := copy(chunk.data[start:], src); copied < len(src) {
+		atomic.AddInt64(&app, 1)
 		chunk.data = append(chunk.data, src[copied:]...) // append the remaining bytes
 	}
 	chunk.endingPos += len(src)
@@ -158,4 +162,12 @@ func (chunk *Chunk) WriteByte(b byte) error {
 	chunk.data = append(chunk.data, b)
 	chunk.endingPos++
 	return nil
+}
+
+func (c *Chunk) Data() []byte {
+	return c.data[:c.endingPos]
+}
+
+func (c *Chunk) Size() int {
+	return c.endingPos
 }

@@ -238,6 +238,27 @@ func TestConcurrentLineProcessor_MultipleReaders(t *testing.T) {
 	assert.Equal(t, 4, pr.RowsRead())
 }
 
+func TestConcurrentLineProcessor_MultipleReadersWithRowLimit(t *testing.T) {
+	r1 := newReadCloser("line1\nline2\nline3\nline4\n")
+	r2 := newReadCloser("line5\nline6\nline7\nline8\n")
+	r3 := newReadCloser("line9\nline10\nline11\n")
+
+	pr := NewConcurrentLineProcessor(nil, WithReaders(r1, r2, r3), WithRowsReadLimit(6))
+	out, err := io.ReadAll(pr)
+	assert.NoError(t, err)
+
+	content := strings.TrimRight(string(out), "\n")
+	assert.NotEmpty(t, content)
+
+	lines := strings.Split(content, "\n")
+	assert.Len(t, lines, 6, "expected exactly 6 lines due to row limit")
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(6), metrics.RowsRead)
+	assert.Equal(t, int64(6), metrics.RowsWritten)
+	assert.Equal(t, 6, pr.RowsRead())
+}
+
 func TestConcurrentLineProcessor_MultipleReadersLargeInput(t *testing.T) {
 	const (
 		readersCount   = 5
