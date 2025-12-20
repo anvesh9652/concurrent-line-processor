@@ -103,29 +103,15 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 		return err
 	}
 
-	// var timesBigger int64
-	// once := sync.Once{}
 	customProcessor := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
 		// return handleLineNormalWay(b, columns, w.(io.ByteWriter))
-
-		err := hanldeLineWithParser(b, columns, w.(io.ByteWriter))
-		// c := w.(*clp.Chunk)
-		// if len(b) > c.Size() {
-		// 	atomic.AddInt64(&timesBigger, 1)
-		// 	once.Do(func() {
-		// 		fmt.Println("bigger chunk found:", len(b), ">", c.Size())
-		// 		// fmt.Println("Json:", string(b))
-		// 		// fmt.Println("CSV:", string(c.Data()))
-		// 	})
-		// }
-		return err
+		return hanldeLineWithParser(b, columns, w.(io.ByteWriter))
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
 		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers),
 		clp.WithReaders(readers...),
 		clp.WithCustomLineProcessor(customProcessor),
-		clp.WithRowsReadLimit(-1),
 	)
 	defer nr.Close()
 
@@ -135,7 +121,6 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 
 	_, err = io.Copy(w, nr)
 	fmt.Println(nr.Summary())
-	// fmt.Println("timeBigger:", timesBigger)
 	return err
 }
 
