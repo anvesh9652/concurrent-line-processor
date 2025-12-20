@@ -25,9 +25,6 @@ func MultiReaders(files []string) {
 		x = append(x, f)
 	}
 
-	// justDirectRead(x)
-	// return
-
 	lp := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
 		_, err := w.Write(b)
 		return err
@@ -53,15 +50,13 @@ func MultiReaders(files []string) {
 	fmt.Println(pr.Summary())
 }
 
-func justDirectRead(r []io.ReadCloser) {
-	var nr []io.Reader
-	for _, i := range r {
-		nr = append(nr, i)
+func directRead(rc []io.ReadCloser) {
+	var r []io.Reader
+	for _, i := range rc {
+		r = append(r, i)
 	}
 
-	mr := io.MultiReader(nr...)
-
-	n, err := io.Copy(io.Discard, mr)
+	n, err := io.Copy(io.Discard, io.MultiReader(r...))
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -115,7 +115,6 @@ var (
 //	if err != nil {
 //		log.Fatal(err)
 //	}
-
 func NewConcurrentLineProcessor(r io.ReadCloser, opts ...Option) *concurrentLineProcessor {
 	pr, pw := io.Pipe()
 

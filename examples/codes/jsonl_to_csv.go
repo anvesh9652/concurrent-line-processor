@@ -21,9 +21,8 @@ func InitConvertJtoC(file string) {
 	f, err := os.Open(file)
 	clp.ExitOnError(err)
 
-	// cols, err := GetAllKeys(f, 4)
+	// cols, err := GetAllKeys(f, -1)
 	// clp.ExitOnError(err)
-	// _ = cols
 
 	tf, err := os.Create("/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/test_conv.csv")
 	clp.ExitOnError(err)
@@ -84,7 +83,7 @@ func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
-		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers), clp.WithRowsReadLimit(10),
+		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers),
 		clp.WithCustomLineProcessor(customProcessor),
 	)
 
