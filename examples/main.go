@@ -13,6 +13,7 @@ func main() {
 	dir := "./profiling"
 	defer profile.Start(profile.CPUProfile, profile.ProfilePath(dir), profile.Quiet).Stop()
 	// defer profile.Start(profile.MemProfile, profile.ProfilePath(dir), profile.MemProfileRate(1)).Stop()
+	// defer profile.Start(profile.MemProfileHeap, profile.ProfilePath(dir), profile.MemProfileRate(1)).Stop()
 
 	start()
 }
@@ -25,8 +26,8 @@ func start() {
 	withTiming(func() {
 		// GetAllKeys(r, -1)
 		// InitConvertCtoJ(r)
-		InitConvertJtoC(clp.Files[3])
-		// MultiReaders(clp.Files)
+		// InitConvertJtoC(clp.Files[3])
+		MultiReaders(clp.Files)
 	})
 }
 

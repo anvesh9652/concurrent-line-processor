@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	clp "github.com/anvesh9652/concurrent-line-processor"
 	"github.com/valyala/fastjson"
@@ -104,21 +103,21 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 		return err
 	}
 
-	var timesBigger int64
-	once := sync.Once{}
+	// var timesBigger int64
+	// once := sync.Once{}
 	customProcessor := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
 		// return handleLineNormalWay(b, columns, w.(io.ByteWriter))
 
 		err := hanldeLineWithParser(b, columns, w.(io.ByteWriter))
-		c := w.(*clp.Chunk)
-		if len(b) > c.Size() {
-			atomic.AddInt64(&timesBigger, 1)
-			once.Do(func() {
-				fmt.Println("bigger chunk found:", len(b), ">", c.Size())
-				// fmt.Println("Json:", string(b))
-				// fmt.Println("CSV:", string(c.Data()))
-			})
-		}
+		// c := w.(*clp.Chunk)
+		// if len(b) > c.Size() {
+		// 	atomic.AddInt64(&timesBigger, 1)
+		// 	once.Do(func() {
+		// 		fmt.Println("bigger chunk found:", len(b), ">", c.Size())
+		// 		// fmt.Println("Json:", string(b))
+		// 		// fmt.Println("CSV:", string(c.Data()))
+		// 	})
+		// }
 		return err
 	}
 
@@ -126,7 +125,7 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers),
 		clp.WithReaders(readers...),
 		clp.WithCustomLineProcessor(customProcessor),
-		clp.WithRowsReadLimit(3),
+		clp.WithRowsReadLimit(-1),
 	)
 	defer nr.Close()
 

@@ -204,6 +204,35 @@ func TestConcurrentLineProcessor_SmallChunkSize_OrderNotGuaranteed(t *testing.T)
 	assert.Greater(t, metrics.BytesWritten, int64(0))
 }
 
+func TestConcurrentLineProcessor_ChunksizeSmallerThanSingleRow(t *testing.T) {
+	input := "line1\nline2\nline3\nline4\nline5\n"
+	r := newReadCloser(input)
+	pr := NewConcurrentLineProcessor(r, WithChunkSize(2)) // very small chunk size
+	out, err := io.ReadAll(pr)
+	assert.NoError(t, err)
+	// Split and compare as sets (ignoring order)
+	inputLines := strings.Split(strings.TrimSpace(input), "\n")
+	outputLines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	assert.Equal(t, len(inputLines), len(outputLines))
+
+	lineCount := make(map[string]int)
+	for _, l := range inputLines {
+		lineCount[l]++
+	}
+	for _, l := range outputLines {
+		lineCount[l]--
+	}
+	for l, c := range lineCount {
+		assert.Equal(t, 0, c, "line %q count mismatch", l)
+	}
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(5), metrics.RowsRead)
+	assert.Equal(t, int64(5), metrics.RowsWritten)
+	assert.Equal(t, int64(len(input)), metrics.BytesRead)
+	assert.Greater(t, metrics.BytesWritten, int64(0))
+}
+
 func TestConcurrentLineProcessor_MultipleReaders(t *testing.T) {
 	r1 := newReadCloser("alpha\nbeta\n")
 	r2 := newReadCloser("gamma\ndelta\n")
