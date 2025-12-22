@@ -85,8 +85,8 @@ var (
 	defaultChunkSize = 64 * KB
 
 	// defaultWorkers is the default number of goroutines used for processing chunks.
-	// It defaults to the number of CPU cores available.
-	defaultWorkers  = runtime.NumCPU()
+	// It defaults to the number of CPU cores available to use.
+	defaultWorkers  = runtime.GOMAXPROCS(0)
 	defaultChanSize = 70
 )
 
@@ -240,6 +240,8 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 
 		leftOver = make([]byte, 0, p.chunkSize)
 		currBuff = p.newChunkFromPool(-1, -1) // temporary buffer for reading
+
+		err error
 	)
 	defer p.putChunkToPool(currBuff)
 
@@ -268,12 +270,13 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 				return readErr
 			}
 
-			var err error
-			if chunk.endingPos > 0 {
-				atomic.AddInt64(&p.metrics.RowsRead, 1) // if we are here then it's the last line without "\n" at end
-				err = sendToStream(ctx, p.inStream, chunk)
+			if read == 0 {
+				if chunk.endingPos > 0 {
+					atomic.AddInt64(&p.metrics.RowsRead, 1) // if we are here then it's the last line without "\n" at end
+					err = sendToStream(ctx, p.inStream, chunk)
+				}
+				return err
 			}
-			return err
 		}
 
 		_, _ = chunk.Write(currBuff.data[:read])

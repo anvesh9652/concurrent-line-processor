@@ -233,6 +233,26 @@ func TestConcurrentLineProcessor_ChunksizeSmallerThanSingleRow(t *testing.T) {
 	assert.Greater(t, metrics.BytesWritten, int64(0))
 }
 
+func TestOnGrownChunkReuse(t *testing.T) {
+	chunkSize := 10
+	input := "123456789012345\n"
+	r := newReadCloser(input)
+
+	p := NewConcurrentLineProcessor(r, WithChunkSize(chunkSize), WithWorkers(1))
+
+	// To increase chance of picking the large chunk in iter 2, we can clear the pool or fill it with large chunks.
+	for i := 0; i < 10; i++ {
+		p.chunkPool.Put(&Chunk{data: make([]byte, 100)})
+	}
+
+	_, err := io.Copy(io.Discard, p)
+	assert.NoError(t, err)
+	m := p.Metrics()
+	assert.Equal(t, int64(1), m.RowsRead)
+	assert.Equal(t, int64(1), m.RowsWritten)
+	assert.Equal(t, int64(16), m.BytesRead)
+}
+
 func TestConcurrentLineProcessor_MultipleReaders(t *testing.T) {
 	r1 := newReadCloser("alpha\nbeta\n")
 	r2 := newReadCloser("gamma\ndelta\n")

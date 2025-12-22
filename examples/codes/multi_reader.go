@@ -29,11 +29,14 @@ func MultiReaders(files []string) {
 		_, err := w.Write(b)
 		return err
 	}
+	// lp = nil
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 
-	pr := clp.NewConcurrentLineProcessor(nil, clp.WithReaders(x...), clp.WithCustomLineProcessor(lp), clp.WithContext(ctx))
+	pr := clp.NewConcurrentLineProcessor(nil, clp.WithReaders(x...), clp.WithCustomLineProcessor(lp),
+		// clp.WithChunkSize(chunkSize),
+		clp.WithContext(ctx))
 	defer pr.Close()
 
 	w := io.Discard

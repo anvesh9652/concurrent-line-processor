@@ -25,8 +25,8 @@ func start() {
 	withTiming(func() {
 		// GetAllKeys(r, -1)
 		// InitConvertCtoJ(r)
-		InitConvertJtoC(clp.Files[3])
-		// MultiReaders(clp.Files)
+		// InitConvertJtoC(clp.Files[3])
+		MultiReaders(clp.Files)
 	})
 }
 
