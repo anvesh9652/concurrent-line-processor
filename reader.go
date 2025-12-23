@@ -311,15 +311,15 @@ func (p *concurrentLineProcessor) processChunks(ctx context.Context) error {
 	poolErrG, ctxEg := errgroup.WithContext(ctx)
 	for range p.workers {
 		poolErrG.Go(func() error {
-			for {
-				chunk, err := getFromStream(ctxEg, p.inStream)
-				if err != nil || chunk == nil {
+			for chunk := range p.inStream {
+				if err := ctxEg.Err(); err != nil {
 					return err
 				}
 				if err := p.processSingleChunk(ctxEg, chunk); err != nil {
 					return err
 				}
 			}
+			return nil
 		})
 	}
 	return poolErrG.Wait()
@@ -368,9 +368,8 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 }
 
 func (p *concurrentLineProcessor) writeProcessedData(ctx context.Context) error {
-	for {
-		chunk, err := getFromStream(ctx, p.outStream)
-		if err != nil || chunk == nil {
+	for chunk := range p.outStream {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 
@@ -390,6 +389,7 @@ func (p *concurrentLineProcessor) writeProcessedData(ctx context.Context) error 
 			return err
 		}
 	}
+	return nil
 }
 
 // drainChannelData drains the input and output channels to ensure no data is leaking after any errors
@@ -409,25 +409,24 @@ func (p *concurrentLineProcessor) putChunkToPool(chunk *Chunk) {
 	p.chunkPool.Put(chunk)
 }
 
-func getFromStream(ctx context.Context, ch chan *Chunk) (*Chunk, error) {
-	select {
-	case chunk := <-ch:
-		return chunk, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
 func sendToStream(ctx context.Context, ch chan *Chunk, chunk *Chunk) error {
 	if chunk == nil || chunk.endingPos == 0 {
 		return nil
 	}
+
+	// FAST PATH: Try to send immediately.
 	select {
 	case ch <- chunk:
-	case <-ctx.Done():
-		return ctx.Err()
+		return nil
+	default:
+		// SLOW PATH: Channel is full.
+		select {
+		case ch <- chunk:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	return nil
 }
 
 func (p *concurrentLineProcessor) trimmedBuff(buff []byte) (int, int) {
