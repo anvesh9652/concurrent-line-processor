@@ -75,11 +75,11 @@ func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 	return columns, nil
 }
 
-// These functions can be reusalbe outside of this package
+// These functions can be reusable outside of this package
 func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
 	customProcessor := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
 		// return handleLineNormalWay(b, columns, w.(io.ByteWriter))
-		return hanldeLineWithParser(b, columns, w.(io.ByteWriter))
+		return handleLineWithParser(b, columns, w.(io.ByteWriter))
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
@@ -104,7 +104,7 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 
 	customProcessor := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
 		// return handleLineNormalWay(b, columns, w.(io.ByteWriter))
-		return hanldeLineWithParser(b, columns, w.(io.ByteWriter))
+		return handleLineWithParser(b, columns, w.(io.ByteWriter))
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
@@ -214,7 +214,7 @@ func handleLineNormalWay(b []byte, cols []string, w io.ByteWriter) error {
 // 1. Slice Allocation: Creating []byte{','} allocates a new slice header (and potentially backing array) every time.
 // 2. Generic Overhead: Write() handles arbitrary lengths, involving bounds checks and copy() logic, which is overkill for 1 byte.
 // 3. Compiler Optimization: WriteByte is often inlined and compiles down to a simple array access/append, avoiding function call overhead.
-func hanldeLineWithParser(line []byte, cols []string, w io.ByteWriter) error {
+func handleLineWithParser(line []byte, cols []string, w io.ByteWriter) error {
 	parser := parserPool.Get()
 	defer parserPool.Put(parser)
 	v, err := parser.ParseBytes(line)

@@ -255,7 +255,7 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 		rem := min(cap(chunk.data)-chunk.endingPos, p.chunkSize)
 
 		// If the single line it self is bigger than given chunk size then it's fine to grow the
-		// chunk down the line since we didn't want to endup in an infine loop.
+		// chunk down the line since we didn't want to endup in an infinite loop.
 		if rem == 0 {
 			minNeeded := 32 * KB
 			if p.chunkSize < minNeeded {
@@ -483,7 +483,7 @@ func (p *concurrentLineProcessor) isLimitReached(chunk *Chunk, linesToUpdate int
 		return true
 	}
 	// Here we kind of have overlap and
-	// we need to remove exces lines, which might have been added by other readHandler
+	// we need to remove excess lines, which might have been added by other readHandler
 	var till, c int
 	for line := range Lines(chunk.data[:chunk.endingPos], true) {
 		till, c = till+len(line), c+1

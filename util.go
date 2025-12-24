@@ -44,7 +44,7 @@ func IfNull[T any](org *T, def T) T {
 // Otherwise it will have the trailing newline character.
 // Uses Go 1.23+ range-over-func iteration pattern.
 func Lines(l []byte, rawLine bool) iter.Seq[[]byte] {
-	return func(yeild func([]byte) bool) {
+	return func(yield func([]byte) bool) {
 		var s, n int
 		for s < len(l) {
 			i := bytes.IndexByte(l[s:], '\n')
@@ -54,7 +54,7 @@ func Lines(l []byte, rawLine bool) iter.Seq[[]byte] {
 				n = 1 // include the new line if caller wants trailing newline character
 			}
 
-			if !yeild(l[s : s+i+n : len(l)]) {
+			if !yield(l[s : s+i+n : len(l)]) {
 				return
 			}
 			s, n = s+i+1, 0
