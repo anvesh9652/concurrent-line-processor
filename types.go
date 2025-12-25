@@ -160,10 +160,12 @@ func (chunk *Chunk) WriteByte(b byte) error {
 	return nil
 }
 
-func (c *Chunk) Data() []byte {
-	return c.data[:c.endingPos]
-}
+func (chunk *Chunk) Grow(n int) {
+	available := min(cap(chunk.data)-chunk.endingPos, n)
+	chunk.data = chunk.data[:chunk.endingPos+available]
 
-func (c *Chunk) Size() int {
-	return c.endingPos
+	rem := n - available
+	if rem > 0 {
+		chunk.data = append(chunk.data, make([]byte, rem)...)
+	}
 }

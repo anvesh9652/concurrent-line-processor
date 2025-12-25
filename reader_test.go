@@ -245,8 +245,10 @@ func TestOnGrownChunkReuse(t *testing.T) {
 		p.chunkPool.Put(&Chunk{data: make([]byte, 100)})
 	}
 
-	_, err := io.Copy(io.Discard, p)
+	out, err := io.ReadAll(p)
 	assert.NoError(t, err)
+
+	assert.Equal(t, input, string(out))
 	m := p.Metrics()
 	assert.Equal(t, int64(1), m.RowsRead)
 	assert.Equal(t, int64(1), m.RowsWritten)

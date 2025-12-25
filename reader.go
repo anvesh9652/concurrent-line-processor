@@ -88,6 +88,8 @@ var (
 	// It defaults to the number of CPU cores available to use.
 	defaultWorkers  = runtime.GOMAXPROCS(0)
 	defaultChanSize = 70
+
+	newLine = []byte{'\n'}
 )
 
 // NewConcurrentLineProcessor creates a new concurrentLineProcessor that reads from the provided io.ReadCloser.
@@ -240,10 +242,11 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 
 		leftOver = make([]byte, 0, p.chunkSize)
 		currBuff = p.newChunkFromPool(-1, -1) // temporary buffer for reading
-
-		err error
 	)
 	defer p.putChunkToPool(currBuff)
+
+	start := time.Now()
+	var total int
 
 	for {
 		if p.rowsReadLimit != -1 && p.RowsRead() >= p.rowsReadLimit { // If rowsReadLimit is set, check if it has been reached
@@ -252,19 +255,18 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 
 		chunk := p.newChunkFromPool(chunkID, readerID)
 		_, _ = chunk.Write(leftOver)
+		leftOver = leftOver[:0]
 		rem := min(cap(chunk.data)-chunk.endingPos, p.chunkSize)
 
 		// If the single line it self is bigger than given chunk size then it's fine to grow the
 		// chunk down the line since we didn't want to endup in an infinite loop.
 		if rem == 0 {
-			minNeeded := 32 * KB
-			if p.chunkSize < minNeeded {
-				_, _ = currBuff.Write(make([]byte, minNeeded))
-			}
-			rem = max(p.chunkSize, minNeeded)
+			rem = max(p.chunkSize, 32*KB)
 		}
-
-		read, readErr := r.Read(currBuff.data[:rem])
+		chunk.Grow(rem)
+		read, readErr := r.Read(chunk.data[chunk.endingPos : chunk.endingPos+rem])
+		// read, readErr := r.Read(currBuff.data[:rem])
+		total += read
 		if readErr != nil {
 			if !errors.Is(readErr, io.EOF) {
 				return readErr
@@ -273,13 +275,12 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 			if read == 0 {
 				if chunk.endingPos > 0 {
 					atomic.AddInt64(&p.metrics.RowsRead, 1) // if we are here then it's the last line without "\n" at end
-					err = sendToStream(ctx, p.inStream, chunk)
+					return sendToStream(ctx, p.inStream, chunk)
 				}
-				return err
+				break
 			}
 		}
-
-		_, _ = chunk.Write(currBuff.data[:read])
+		chunk.endingPos += read
 		chunk.endingPos, linesToUpdate = p.trimmedBuff(chunk.data[:chunk.endingPos])
 		atomic.AddInt64(&p.metrics.BytesRead, int64(read))
 
@@ -288,21 +289,27 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 			break
 		}
 
-		ind := bytes.LastIndex(chunk.data[:chunk.endingPos], []byte{'\n'})
+		ind := bytes.LastIndex(chunk.data[:chunk.endingPos], newLine)
 		if ind == -1 {
-			leftOver = append(leftOver[:0], chunk.data[:chunk.endingPos]...)
+			leftOver = append(leftOver, chunk.data[:chunk.endingPos]...)
 			p.putChunkToPool(chunk)
 			continue
 		}
 
-		leftOver = append(leftOver[:0], chunk.data[ind+1:chunk.endingPos]...)
+		leftOver = append(leftOver, chunk.data[ind+1:chunk.endingPos]...)
 		chunk.endingPos = ind + 1
 		if err := sendToStream(ctx, p.inStream, chunk); err != nil {
 			return err
 		}
-
 		chunkID++
 	}
+
+	elapsed := time.Since(start)
+	bps := float64(total) / elapsed.Seconds()
+
+	_ = bps
+	// fmt.Printf("read %d bytes in %v\n", total, elapsed)
+	// fmt.Printf("speed: %.2f GB/s\n", bps/1e9)
 	return nil
 }
 
@@ -430,7 +437,7 @@ func sendToStream(ctx context.Context, ch chan *Chunk, chunk *Chunk) error {
 }
 
 func (p *concurrentLineProcessor) trimmedBuff(buff []byte) (int, int) {
-	buffLinesCnt := bytes.Count(buff, []byte{'\n'})
+	buffLinesCnt := bytes.Count(buff, newLine)
 	if p.rowsReadLimit == -1 {
 		return len(buff), buffLinesCnt
 	}

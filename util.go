@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
+	"log"
 	"math"
 	"os"
 	"runtime/debug"
@@ -168,4 +170,27 @@ func Filter[T any](arr []T, keep func(T) bool) []T {
 
 func Ptr[T any](v T) *T {
 	return &v
+}
+
+func DrainData(r io.Reader) {
+	buf := make([]byte, 1*1024*1024) // 4 MiB buffer; try 1<<20, 2<<20, 8<<20 as experiments
+
+	start := time.Now()
+	var total int64
+	for {
+		n, err := r.Read(buf)
+		total += int64(n)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Fatalf("read error: %v", err)
+		}
+	}
+
+	elapsed := time.Since(start)
+	bps := float64(total) / elapsed.Seconds()
+
+	fmt.Printf("read %d bytes in %v\n", total, elapsed)
+	fmt.Printf("speed: %.2f GB/s\n", bps/1e9)
 }
