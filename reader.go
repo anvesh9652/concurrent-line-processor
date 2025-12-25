@@ -241,12 +241,7 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 		chunkID, linesToUpdate int
 
 		leftOver = make([]byte, 0, p.chunkSize)
-		currBuff = p.newChunkFromPool(-1, -1) // temporary buffer for reading
 	)
-	defer p.putChunkToPool(currBuff)
-
-	start := time.Now()
-	var total int
 
 	for {
 		if p.rowsReadLimit != -1 && p.RowsRead() >= p.rowsReadLimit { // If rowsReadLimit is set, check if it has been reached
@@ -265,8 +260,6 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 		}
 		chunk.Grow(rem)
 		read, readErr := r.Read(chunk.data[chunk.endingPos : chunk.endingPos+rem])
-		// read, readErr := r.Read(currBuff.data[:rem])
-		total += read
 		if readErr != nil {
 			if !errors.Is(readErr, io.EOF) {
 				return readErr
@@ -303,13 +296,6 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 		}
 		chunkID++
 	}
-
-	elapsed := time.Since(start)
-	bps := float64(total) / elapsed.Seconds()
-
-	_ = bps
-	// fmt.Printf("read %d bytes in %v\n", total, elapsed)
-	// fmt.Printf("speed: %.2f GB/s\n", bps/1e9)
 	return nil
 }
 
