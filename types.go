@@ -61,7 +61,7 @@ type Chunk struct {
 // All fields use zero-based indexing.
 type ChunkDetails struct {
 	// ReaderID identifies which source reader this data came from.
-	// Useful when processing multiple readers via WithMultiReaders.
+	// Useful when processing multiple readers via WithReaders.
 	ReaderID int
 	// ChunkID is the sequential ID of the chunk within its source reader.
 	// Can be used for ordering or debugging purposes.

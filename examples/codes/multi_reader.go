@@ -33,10 +33,13 @@ func MultiReaders(files []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 
-	pr := clp.NewConcurrentLineProcessor(nil, clp.WithReaders(x...), clp.WithCustomLineProcessor(lp), clp.WithContext(ctx))
+	pr := clp.NewConcurrentLineProcessor(nil, clp.WithReaders(x...),
+		clp.WithCustomLineProcessor(lp), clp.WithContext(ctx),
+	)
 	defer pr.Close()
 
 	w := io.Discard
+	// w := os.Stdout
 	// w, err = os.Create("./tmp/multi_reader_output.txt")
 	// if err != nil {
 	// 	log.Fatal(err)
@@ -46,7 +49,6 @@ func MultiReaders(files []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// chunkSize=64KB workers=10 bytesRead=34.99GB bytesWritten=34.99GB rowsRead=1015862593 rowsWritten=1015862594 throughput=5.74GB/s elapsed=6.09s
 	fmt.Println(pr.Summary())
 }
 

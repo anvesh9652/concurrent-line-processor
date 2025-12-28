@@ -16,6 +16,17 @@
 //   - Backpressure-friendly internal bounded channels
 //   - Memory-efficient sync.Pool-based chunk allocation
 //
+// # Output Ordering
+//
+// IMPORTANT: By default, output lines may NOT preserve the original input order.
+// Concurrent processing with multiple workers causes chunks to complete at different
+// times, resulting in unpredictable output ordering.
+//
+// To guarantee ordered output:
+//   - Use WithWorkers(1) to process sequentially
+//   - For multiple input sources, merge them with io.MultiReader before passing to the processor
+//     instead of using WithMultiReaders/WithReaders (which processes sources concurrently)
+//
 // # Basic Usage
 //
 //	import (
@@ -78,16 +89,19 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var (
+const (
 	KB = 1024
 	// defaultChunkSize is the default size for reading chunks from the source (64KB).
 	// This provides a good balance between memory usage and performance for most use cases.
 	defaultChunkSize = 64 * KB
 
+	defaultChanSize = 70
+)
+
+var (
 	// defaultWorkers is the default number of goroutines used for processing chunks.
 	// It defaults to the number of CPU cores available to use.
-	defaultWorkers  = runtime.GOMAXPROCS(0)
-	defaultChanSize = 70
+	defaultWorkers = runtime.GOMAXPROCS(0)
 
 	newLine = []byte{'\n'}
 )
@@ -99,6 +113,8 @@ var (
 //
 // The processor splits input into chunks, processes each line concurrently using multiple workers,
 // and provides the processed output through the Read method.
+//
+// IMPORTANT: Output order is NOT guaranteed by default. Use WithWorkers(1) for ordered output.
 //
 // Example:
 //
@@ -240,7 +256,7 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 	var (
 		chunkID, linesToUpdate int
 
-		leftOver = make([]byte, 0, p.chunkSize)
+		chunk = p.newChunkFromPool(chunkID, readerID)
 	)
 
 	for {
@@ -248,9 +264,6 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 			break
 		}
 
-		chunk := p.newChunkFromPool(chunkID, readerID)
-		_, _ = chunk.Write(leftOver)
-		leftOver = leftOver[:0]
 		rem := min(cap(chunk.data)-chunk.endingPos, p.chunkSize)
 
 		// If the single line it self is bigger than given chunk size then it's fine to grow the
@@ -284,17 +297,20 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 
 		ind := bytes.LastIndex(chunk.data[:chunk.endingPos], newLine)
 		if ind == -1 {
-			leftOver = append(leftOver, chunk.data[:chunk.endingPos]...)
-			p.putChunkToPool(chunk)
 			continue
 		}
+		nextChunk := p.newChunkFromPool(chunkID+1, readerID)
+		if ind+1 < chunk.endingPos {
+			_, _ = nextChunk.Write(chunk.data[ind+1 : chunk.endingPos])
+		}
 
-		leftOver = append(leftOver, chunk.data[ind+1:chunk.endingPos]...)
 		chunk.endingPos = ind + 1
 		if err := sendToStream(ctx, p.inStream, chunk); err != nil {
 			return err
 		}
+
 		chunkID++
+		chunk = nextChunk
 	}
 	return nil
 }

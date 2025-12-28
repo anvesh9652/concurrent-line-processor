@@ -34,9 +34,16 @@ func WithChunkSize(size int) Option {
 // More workers can improve performance for CPU-intensive line processing,
 // but may not help for I/O-bound operations. The default is runtime.NumCPU().
 //
+// IMPORTANT: Multiple workers process chunks concurrently, which means output order
+// is NOT preserved. Use WithWorkers(1) if you need output to maintain input order.
+//
 // Example:
 //
 //	clp.NewConcurrentLineProcessor(reader, clp.WithWorkers(8))
+//
+// For ordered output:
+//
+//	clp.NewConcurrentLineProcessor(reader, clp.WithWorkers(1))
 func WithWorkers(n int) Option {
 	return func(pr *concurrentLineProcessor) {
 		pr.workers = n
@@ -132,6 +139,13 @@ func WithChannelSize(size int) Option {
 // WithReaders sets multiple source readers for the concurrentLineProcessor.
 // When used, the reader passed to NewConcurrentLineProcessor can be nil because this option replaces the internal reader list.
 // Empty readers will by handled by Read method.
+//
+// IMPORTANT: Multiple readers are processed concurrently, so output from different
+// sources will be interleaved unpredictably. If you need ordered output across
+// multiple sources, merge them with io.MultiReader before passing to the processor:
+//
+//	merged := io.NopCloser(io.MultiReader(r1, r2, r3))
+//	clp.NewConcurrentLineProcessor(merged, clp.WithWorkers(1))
 //
 // Example:
 //
