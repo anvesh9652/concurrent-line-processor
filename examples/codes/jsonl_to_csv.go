@@ -20,14 +20,9 @@ var parserPool = fastjson.ParserPool{}
 func InitConvertJtoC(file string) {
 	f, err := os.Open(file)
 	clp.ExitOnError(err)
-	defer f.Close()
 
 	// cols, err := GetAllKeys(f, -1)
 	// clp.ExitOnError(err)
-
-	f, err = os.Open(file)
-	clp.ExitOnError(err)
-	defer f.Close()
 
 	tf, err := os.Create("/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/test_conv.csv")
 	clp.ExitOnError(err)
@@ -76,19 +71,19 @@ func GetAllKeys(r io.ReadCloser, rowsLimit int) ([]string, error) {
 	for k := range keys {
 		columns = append(columns, k)
 	}
-	// fmt.Println(nr.Summary())
+	fmt.Println(nr.Summary())
 	return columns, nil
 }
 
-// These functions can be reusalbe outside of this package
+// These functions can be reusable outside of this package
 func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
 	customProcessor := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
 		// return handleLineNormalWay(b, columns, w.(io.ByteWriter))
-		return hanldeLineWithParser(b, columns, w.(io.ByteWriter))
+		return handleLineWithParser(b, columns, w.(io.ByteWriter))
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
-		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers), clp.WithRowsReadLimit(-1),
+		clp.WithChunkSize(chunkSize), clp.WithWorkers(workers),
 		clp.WithCustomLineProcessor(customProcessor),
 	)
 
@@ -97,7 +92,7 @@ func ConvertJsonlToCsv(columns []string, r io.ReadCloser, w io.Writer) error {
 	}
 
 	_, err := io.Copy(w, nr)
-	// fmt.Println(nr.Summary())
+	fmt.Println(nr.Summary())
 	return err
 }
 
@@ -109,7 +104,7 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 
 	customProcessor := func(b []byte, _ *clp.ChunkDetails, w io.Writer) error {
 		// return handleLineNormalWay(b, columns, w.(io.ByteWriter))
-		return hanldeLineWithParser(b, columns, w.(io.ByteWriter))
+		return handleLineWithParser(b, columns, w.(io.ByteWriter))
 	}
 
 	nr := clp.NewConcurrentLineProcessor(r,
@@ -117,13 +112,14 @@ func ConvertJsonlToCsvFixedColumns(r io.ReadCloser, w io.Writer) error {
 		clp.WithReaders(readers...),
 		clp.WithCustomLineProcessor(customProcessor),
 	)
+	defer nr.Close()
 
 	if _, err := w.Write([]byte(strings.Join(columns, ",") + "\n")); err != nil {
 		return err
 	}
 
 	_, err = io.Copy(w, nr)
-	// fmt.Println(nr.Summary())
+	fmt.Println(nr.Summary())
 	return err
 }
 
@@ -218,7 +214,7 @@ func handleLineNormalWay(b []byte, cols []string, w io.ByteWriter) error {
 // 1. Slice Allocation: Creating []byte{','} allocates a new slice header (and potentially backing array) every time.
 // 2. Generic Overhead: Write() handles arbitrary lengths, involving bounds checks and copy() logic, which is overkill for 1 byte.
 // 3. Compiler Optimization: WriteByte is often inlined and compiles down to a simple array access/append, avoiding function call overhead.
-func hanldeLineWithParser(line []byte, cols []string, w io.ByteWriter) error {
+func handleLineWithParser(line []byte, cols []string, w io.ByteWriter) error {
 	parser := parserPool.Get()
 	defer parserPool.Put(parser)
 	v, err := parser.ParseBytes(line)
@@ -229,13 +225,27 @@ func hanldeLineWithParser(line []byte, cols []string, w io.ByteWriter) error {
 		if i > 0 {
 			w.WriteByte(',')
 		}
-		escapeFieldByte(v.Get(col).MarshalTo(nil), w)
-		// escapeFieldByte([]byte(v.Get(col).String()), w)
+
+		val := v.Get(col)
+		if val.Type() == fastjson.TypeString {
+			escapeFieldByte(v.GetStringBytes(col), w)
+			continue
+		}
+
+		// escapeFieldByte(v.GetStringBytes(col), w)
+		escapeFieldByte(val.MarshalTo(nil), w)
 	}
 	return nil
 }
 
 func escapeFieldByte(field []byte, dst io.ByteWriter) {
+	if bytes.IndexByte(field, '"') == -1 {
+		for _, c := range field {
+			dst.WriteByte(c)
+		}
+		return
+	}
+
 	dst.WriteByte('"')
 	for _, c := range field {
 		if c == '"' { // escape quotes by doubling

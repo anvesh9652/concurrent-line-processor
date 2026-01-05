@@ -61,7 +61,7 @@ type Chunk struct {
 // All fields use zero-based indexing.
 type ChunkDetails struct {
 	// ReaderID identifies which source reader this data came from.
-	// Useful when processing multiple readers via WithMultiReaders.
+	// Useful when processing multiple readers via WithReaders.
 	ReaderID int
 	// ChunkID is the sequential ID of the chunk within its source reader.
 	// Can be used for ordering or debugging purposes.
@@ -158,4 +158,14 @@ func (chunk *Chunk) WriteByte(b byte) error {
 	chunk.data = append(chunk.data, b)
 	chunk.endingPos++
 	return nil
+}
+
+func (chunk *Chunk) Grow(n int) {
+	available := min(cap(chunk.data)-chunk.endingPos, n)
+	chunk.data = chunk.data[:chunk.endingPos+available]
+
+	rem := n - available
+	if rem > 0 {
+		chunk.data = append(chunk.data, make([]byte, rem)...)
+	}
 }

@@ -2,5 +2,5 @@ package codes
 
 var (
 	workers   = 8
-	chunkSize = 1024 * 1024 * 4 // 4 MB
+	chunkSize = 4 << 20 // 4 MB
 )

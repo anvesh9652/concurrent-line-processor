@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
+	"log"
 	"math"
 	"os"
 	"runtime/debug"
@@ -28,7 +30,7 @@ var Files = []string{
 	"/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/data/temp_example.csv",
 	"/Users/agali/go-workspace/src/github.com/anvesh9652/concurrent-line-processor/tmp/2024-06-04-details.jsonl",
 	"/Users/agali/Downloads/temp/my_data/usage_data_12m.json",
-	"/Users/agali/Downloads/temp/my_data/usage_data_3m.json",
+	"/Users/agali/Downloads/temp/my_data/usage_data_3m.json", // this file for test
 	"/Users/agali/Desktop/Work/go-lang/tryouts/1brc/gen/measurements.txt",
 }
 
@@ -44,7 +46,7 @@ func IfNull[T any](org *T, def T) T {
 // Otherwise it will have the trailing newline character.
 // Uses Go 1.23+ range-over-func iteration pattern.
 func Lines(l []byte, rawLine bool) iter.Seq[[]byte] {
-	return func(yeild func([]byte) bool) {
+	return func(yield func([]byte) bool) {
 		var s, n int
 		for s < len(l) {
 			i := bytes.IndexByte(l[s:], '\n')
@@ -54,11 +56,10 @@ func Lines(l []byte, rawLine bool) iter.Seq[[]byte] {
 				n = 1 // include the new line if caller wants trailing newline character
 			}
 
-			if !yeild(l[s : s+i+n : len(l)]) {
+			if !yield(l[s : s+i+n : len(l)]) {
 				return
 			}
-			s += i + 1
-			n = 0
+			s, n = s+i+1, 0
 		}
 	}
 }
@@ -169,4 +170,27 @@ func Filter[T any](arr []T, keep func(T) bool) []T {
 
 func Ptr[T any](v T) *T {
 	return &v
+}
+
+func DrainData(r io.Reader) {
+	buf := make([]byte, 1*1024*1024) // 4 MiB buffer; try 1<<20, 2<<20, 8<<20 as experiments
+
+	start := time.Now()
+	var total int64
+	for {
+		n, err := r.Read(buf)
+		total += int64(n)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Fatalf("read error: %v", err)
+		}
+	}
+
+	elapsed := time.Since(start)
+	bps := float64(total) / elapsed.Seconds()
+
+	fmt.Printf("read %d bytes in %v\n", total, elapsed)
+	fmt.Printf("speed: %.2f GB/s\n", bps/1e9)
 }

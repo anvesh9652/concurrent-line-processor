@@ -16,6 +16,17 @@
 //   - Backpressure-friendly internal bounded channels
 //   - Memory-efficient sync.Pool-based chunk allocation
 //
+// # Output Ordering
+//
+// IMPORTANT: By default, output lines may NOT preserve the original input order.
+// Concurrent processing with multiple workers causes chunks to complete at different
+// times, resulting in unpredictable output ordering.
+//
+// To guarantee ordered output:
+//   - Use WithWorkers(1) to process sequentially
+//   - For multiple input sources, merge them with io.MultiReader before passing to the processor
+//     instead of using WithMultiReaders/WithReaders (which processes sources concurrently)
+//
 // # Basic Usage
 //
 //	import (
@@ -78,20 +89,21 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var (
+const (
 	KB = 1024
 	// defaultChunkSize is the default size for reading chunks from the source (64KB).
 	// This provides a good balance between memory usage and performance for most use cases.
 	defaultChunkSize = 64 * KB
 
-	// defaultWorkers is the default number of goroutines used for processing chunks.
-	// It defaults to the number of CPU cores available.
-	defaultWorkers  = runtime.NumCPU()
 	defaultChanSize = 70
+)
 
-	// maxLineLength defines the maximum length of a single line.
-	// Any line longer than this will not be accepted and will result in an error.
-	maxLineLength = 16 * KB
+var (
+	// defaultWorkers is the default number of goroutines used for processing chunks.
+	// It defaults to the number of CPU cores available to use.
+	defaultWorkers = runtime.GOMAXPROCS(0)
+
+	newLine = []byte{'\n'}
 )
 
 // NewConcurrentLineProcessor creates a new concurrentLineProcessor that reads from the provided io.ReadCloser.
@@ -101,6 +113,8 @@ var (
 //
 // The processor splits input into chunks, processes each line concurrently using multiple workers,
 // and provides the processed output through the Read method.
+//
+// IMPORTANT: Output order is NOT guaranteed by default. Use WithWorkers(1) for ordered output.
 //
 // Example:
 //
@@ -240,60 +254,63 @@ func (p *concurrentLineProcessor) readAsChunks(ctx context.Context) error {
 
 func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int, r io.ReadCloser) error {
 	var (
-		chunkID, linesToUpdate, rr int
+		chunkID, linesToUpdate int
 
-		leftOver = make([]byte, 0, maxLineLength)
-		currBuff = p.newChunkFromPool(-1, -1) // temporary buffer for reading
+		chunk = p.newChunkFromPool(chunkID, readerID)
 	)
-	defer p.putChunkToPool(currBuff)
 
 	for {
-		if rr = p.RowsRead(); p.rowsReadLimit != -1 && rr >= p.rowsReadLimit { // If rowsReadLimit is set, check if it has been reached
+		if p.rowsReadLimit != -1 && p.RowsRead() >= p.rowsReadLimit { // If rowsReadLimit is set, check if it has been reached
 			break
 		}
 
-		chunk := p.newChunkFromPool(chunkID, readerID)
-		_, _ = chunk.Write(leftOver)
+		rem := min(cap(chunk.data)-chunk.endingPos, p.chunkSize)
 
-		read, readErr := r.Read(currBuff.data)
+		// If the single line it self is bigger than given chunk size then it's fine to grow the
+		// chunk down the line since we didn't want to endup in an infinite loop.
+		if rem == 0 {
+			rem = max(p.chunkSize, 32*KB)
+		}
+		chunk.Grow(rem)
+		read, readErr := r.Read(chunk.data[chunk.endingPos : chunk.endingPos+rem])
 		if readErr != nil {
 			if !errors.Is(readErr, io.EOF) {
 				return readErr
 			}
 
-			var err error
-			if chunk.endingPos > 0 {
-				atomic.AddInt64(&p.metrics.RowsRead, 1) // if we are here then it's the last line without "\n" at end
-				err = sendToStream(ctx, p.inStream, chunk)
+			if read == 0 {
+				if chunk.endingPos > 0 {
+					atomic.AddInt64(&p.metrics.RowsRead, 1) // if we are here then it's the last line without "\n" at end
+					return sendToStream(ctx, p.inStream, chunk)
+				}
+				break
 			}
-			return err
 		}
-
-		_, _ = chunk.Write(currBuff.data[:read])
-		chunk.endingPos, linesToUpdate = trimmedBuff(chunk.data[:chunk.endingPos], p.rowsReadLimit, rr)
-		atomic.AddInt64(&p.metrics.RowsRead, int64(linesToUpdate))
+		chunk.endingPos += read
+		chunk.endingPos, linesToUpdate = p.trimmedBuff(chunk.data[:chunk.endingPos])
 		atomic.AddInt64(&p.metrics.BytesRead, int64(read))
 
-		ind := bytes.LastIndex(chunk.data[:chunk.endingPos], []byte{'\n'})
+		if p.isLimitReached(chunk, linesToUpdate) {
+			p.putChunkToPool(chunk)
+			break
+		}
+
+		ind := bytes.LastIndex(chunk.data[:chunk.endingPos], newLine)
 		if ind == -1 {
-			if chunk.endingPos > maxLineLength {
-				return errors.New("line length exceeds maximum allowed length of " + strconv.Itoa(maxLineLength) + " bytes")
-			}
-			leftOver = append(leftOver[:0], chunk.data[:chunk.endingPos]...)
 			continue
 		}
-
-		if chunk.endingPos-ind > maxLineLength {
-			return errors.New("line length exceeds maximum allowed length of " + strconv.Itoa(maxLineLength) + " bytes")
+		nextChunk := p.newChunkFromPool(chunkID+1, readerID)
+		if ind+1 < chunk.endingPos {
+			_, _ = nextChunk.Write(chunk.data[ind+1 : chunk.endingPos])
 		}
 
-		leftOver = append(leftOver[:0], chunk.data[ind+1:chunk.endingPos]...)
 		chunk.endingPos = ind + 1
 		if err := sendToStream(ctx, p.inStream, chunk); err != nil {
 			return err
 		}
 
 		chunkID++
+		chunk = nextChunk
 	}
 	return nil
 }
@@ -303,15 +320,15 @@ func (p *concurrentLineProcessor) processChunks(ctx context.Context) error {
 	poolErrG, ctxEg := errgroup.WithContext(ctx)
 	for range p.workers {
 		poolErrG.Go(func() error {
-			for {
-				chunk, err := getFromStream(ctxEg, p.inStream)
-				if err != nil || chunk == nil {
+			for chunk := range p.inStream {
+				if err := ctxEg.Err(); err != nil {
 					return err
 				}
 				if err := p.processSingleChunk(ctxEg, chunk); err != nil {
 					return err
 				}
 			}
+			return nil
 		})
 	}
 	return poolErrG.Wait()
@@ -360,9 +377,8 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 }
 
 func (p *concurrentLineProcessor) writeProcessedData(ctx context.Context) error {
-	for {
-		chunk, err := getFromStream(ctx, p.outStream)
-		if err != nil || chunk == nil {
+	for chunk := range p.outStream {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 
@@ -382,6 +398,7 @@ func (p *concurrentLineProcessor) writeProcessedData(ctx context.Context) error 
 			return err
 		}
 	}
+	return nil
 }
 
 // drainChannelData drains the input and output channels to ensure no data is leaking after any errors
@@ -401,37 +418,43 @@ func (p *concurrentLineProcessor) putChunkToPool(chunk *Chunk) {
 	p.chunkPool.Put(chunk)
 }
 
-func getFromStream(ctx context.Context, ch chan *Chunk) (*Chunk, error) {
-	select {
-	case chunk := <-ch:
-		return chunk, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
 func sendToStream(ctx context.Context, ch chan *Chunk, chunk *Chunk) error {
 	if chunk == nil || chunk.endingPos == 0 {
 		return nil
 	}
+
+	// FAST PATH: Try to send immediately.
 	select {
 	case ch <- chunk:
-	case <-ctx.Done():
-		return ctx.Err()
+		return nil
+	default:
+		// SLOW PATH: Channel is full.
+		select {
+		case ch <- chunk:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	return nil
 }
 
-func trimmedBuff(buff []byte, readLimit, currLinesRead int) (int, int) {
-	newLinesCnt := bytes.Count(buff, []byte{'\n'})
-	linesNeeded := newLinesCnt
-	if readLimit != -1 {
-		linesNeeded = readLimit - currLinesRead
-	}
-	if linesNeeded >= newLinesCnt {
-		return len(buff), newLinesCnt
+func (p *concurrentLineProcessor) trimmedBuff(buff []byte) (int, int) {
+	buffLinesCnt := bytes.Count(buff, newLine)
+	if p.rowsReadLimit == -1 {
+		return len(buff), buffLinesCnt
 	}
 
+	currLinesRead, linesNeeded := p.RowsRead(), buffLinesCnt
+	if p.rowsReadLimit != -1 {
+		linesNeeded = p.rowsReadLimit - currLinesRead
+	}
+
+	// Entire buff it self doesn't have enough lines we need
+	if linesNeeded >= buffLinesCnt {
+		return len(buff), buffLinesCnt
+	}
+
+	// We already read the row till limit. we no longer need anything from this buff
 	if linesNeeded <= 0 {
 		return 0, 0
 	}
@@ -442,11 +465,10 @@ func trimmedBuff(buff []byte, readLimit, currLinesRead int) (int, int) {
 		buffLen += len(line)
 
 		if linesFound >= linesNeeded {
-			return buffLen, linesFound
+			break
 		}
 	}
-	// If not enough newlines were found, the whole buffer is used.
-	return len(buff), linesFound
+	return buffLen, linesFound
 }
 
 func (p *concurrentLineProcessor) newChunkFromPool(chunkID, readerID int) *Chunk {
@@ -456,4 +478,30 @@ func (p *concurrentLineProcessor) newChunkFromPool(chunkID, readerID int) *Chunk
 	chunk.data = chunk.data[:p.chunkSize]
 	chunk.id, chunk.readerID, chunk.endingPos, chunk.rowsWritten = chunkID, readerID, 0, 0
 	return chunk
+}
+
+// Tells whether to proceed or not upon reaching limit
+func (p *concurrentLineProcessor) isLimitReached(chunk *Chunk, linesToUpdate int) bool {
+	val := int(atomic.AddInt64(&p.metrics.RowsRead, int64(linesToUpdate)))
+	if p.rowsReadLimit == -1 || val <= p.rowsReadLimit {
+		return false
+	}
+
+	if val-linesToUpdate >= p.rowsReadLimit {
+		atomic.AddInt64(&p.metrics.RowsRead, -int64(linesToUpdate))
+		return true
+	}
+	// Here we kind of have overlap and
+	// we need to remove excess lines, which might have been added by other readHandler
+	var till, c int
+	for line := range Lines(chunk.data[:chunk.endingPos], true) {
+		till, c = till+len(line), c+1
+		if c == linesToUpdate-(val-p.rowsReadLimit) {
+			break
+		}
+	}
+
+	atomic.SwapInt64(&p.metrics.RowsRead, int64(p.rowsReadLimit))
+	chunk.endingPos = till
+	return false
 }

@@ -18,6 +18,9 @@ A high-performance, concurrent line-by-line processor for large files and stream
 - **Multi-source Input**: Merge multiple `io.ReadCloser` inputs into one stream (ordering between sources is nondeterministic)
 - **Backpressure Friendly**: Internal bounded channels help balance producer/consumer throughput
 
+> **⚠️ Important: Output Ordering**  
+> By default, concurrent processing means **output lines may not maintain the same order as the input**. This is because multiple workers process chunks in parallel and complete at different times. If you require ordered output that preserves the input sequence, use `WithWorkers(1)`. For multiple input sources, you must also merge them using Go's `io.MultiReader` instead of `WithMultiReaders` to maintain a single sequential stream.
+
 ## Installation
 
 ```bash
@@ -28,11 +31,7 @@ go get github.com/anvesh9652/concurrent-line-processor@latest
 
 Below are common usage patterns. Each example is self-contained and can be copied into a file and run with `go run`.
 
-### Quick Start
-
-Below are common usage patterns. Each example is self-contained and can be copied into a file and run with `go run`.
-
-> Note: Reading via `io.ReadAll` will accumulate all processed data in memory. Prefer `io.Copy` to a file or stream for very large inputs.
+> **Note**: Reading via `io.ReadAll` will accumulate all processed data in memory. Prefer `io.Copy` to a file or stream for very large inputs.
 
 #### 1. Basic Usage (stream to stdout)
 
@@ -55,7 +54,7 @@ func main() {
     defer file.Close()
 
     processor := clp.NewConcurrentLineProcessor(file)
-    defer processor.Close() // only needed when multiple readers were supplied or to flush pipe early
+    defer processor.Close() // Closes input readers and the internal pipe
 
     // Stream the processed output directly
     if _, err := io.Copy(os.Stdout, processor); err != nil {
@@ -67,7 +66,7 @@ func main() {
 }
 ```
 
-#### 2. Merging Multiple Sources (nondeterministic interleaving)
+#### 2. Merging Multiple Sources (unordered output)
 
 ```go
 package main
@@ -90,6 +89,7 @@ func main() {
         readers = append(readers, f)
     }
 
+    // WithMultiReaders processes sources concurrently - output order is not preserved
     processor := clp.NewConcurrentLineProcessor(nil,
         clp.WithMultiReaders(readers...),
         clp.WithWorkers(4),
@@ -241,7 +241,7 @@ Processing stops when the limit of newline-delimited rows is reached. Internally
 ### Memory Usage
 - A `sync.Pool` minimizes per-chunk allocations.
 - Memory scales with (chunk size * active workers) plus channel buffering.
-- Default chunk size is 64KB (not 30KB as previously documented). Tune based on typical line length.
+- Default chunk size is 64KB. Tune based on typical line length and performance requirements.
 
 ### Worker Count
 - More workers help if your custom line processor is CPU-bound.
@@ -258,8 +258,34 @@ Processing stops when the limit of newline-delimited rows is reached. Internally
 - Default: 70. Increase if workers frequently starve or if you have bursty input.
 
 ### Ordering
-- Output line ordering relative to original input is preserved within individual chunks but overall ordering is **not guaranteed** when using multiple readers or very small chunk sizes with multiple workers.
-- If strict ordering matters, run with `WithWorkers(1)`.
+
+**Default Behavior**: Output lines **do not preserve input order** due to concurrent processing. Multiple workers process chunks in parallel, and chunks complete at different times, causing output to be interleaved unpredictably.
+
+**When You Need Ordered Output**:
+
+If maintaining the exact input order is critical for your use case, configure the processor as follows:
+
+1. **Single Worker**: Use `WithWorkers(1)` to process chunks sequentially
+2. **Single Input Source**: 
+   - ❌ **DO NOT** use `WithMultiReaders()` with multiple sources
+   - ✅ **DO** merge multiple readers using Go's `io.MultiReader()` before passing to the processor
+
+**Example for Ordered Output**:
+```go
+// Merge multiple files while preserving order
+f1, _ := os.Open("file1.txt")
+f2, _ := os.Open("file2.txt")
+f3, _ := os.Open("file3.txt")
+
+// Use io.MultiReader to merge into single sequential stream
+mergedReader := io.NopCloser(io.MultiReader(f1, f2, f3))
+
+processor := clp.NewConcurrentLineProcessor(mergedReader,
+    clp.WithWorkers(1),        // Sequential processing
+)
+```
+
+**Performance Trade-off**: Ordered output sacrifices the concurrent processing benefits and will be significantly slower than the default configuration.
 
 ## Examples
 

@@ -237,149 +237,69 @@ func TestAppendNewLine(t *testing.T) {
 }
 
 func TestFormatBytes(t *testing.T) {
-	// SI Base (1000) Tests
-	t.Run("SI: bytes less than base", func(t *testing.T) {
-		result := FormatBytes(512, BaseSI)
-		assert.Equal(t, "512B", result)
-	})
+	tests := []struct {
+		name  string
+		bytes float64
+		base  float64
+		want  string
+	}{
+		// SI Base (1000) Tests
+		{name: "SI: bytes less than base", bytes: 512, base: BaseSI, want: "512B"},
+		{name: "SI: exact 1KB", bytes: 1000, base: BaseSI, want: "1KB"},
+		{name: "SI: kilobytes with decimals", bytes: 1500, base: BaseSI, want: "1.5KB"},
+		{name: "SI: exact 1MB", bytes: 1000 * 1000, base: BaseSI, want: "1MB"},
+		{name: "SI: megabytes with decimals", bytes: 2.5 * 1000 * 1000, base: BaseSI, want: "2.5MB"},
+		{name: "SI: exact 1GB", bytes: 1000 * 1000 * 1000, base: BaseSI, want: "1GB"},
+		{name: "SI: gigabytes with decimals", bytes: 3.75 * 1000 * 1000 * 1000, base: BaseSI, want: "3.75GB"},
+		{name: "SI: removes trailing zeros", bytes: 10000, base: BaseSI, want: "10KB"},
 
-	t.Run("SI: exact 1KB", func(t *testing.T) {
-		result := FormatBytes(1000, BaseSI)
-		assert.Equal(t, "1KB", result)
-	})
+		// Binary Base (1024) Tests
+		{name: "Binary: bytes less than base", bytes: 512, base: BaseBinary, want: "512B"},
+		{name: "Binary: exact 1KiB", bytes: 1024, base: BaseBinary, want: "1KiB"},
+		{name: "Binary: kibibytes with decimals", bytes: 1536, base: BaseBinary, want: "1.5KiB"},
+		{name: "Binary: exact 1MiB", bytes: 1024 * 1024, base: BaseBinary, want: "1MiB"},
+		{name: "Binary: mebibytes with decimals", bytes: 2.5 * 1024 * 1024, base: BaseBinary, want: "2.5MiB"},
+		{name: "Binary: exact 1GiB", bytes: 1024 * 1024 * 1024, base: BaseBinary, want: "1GiB"},
+		{name: "Binary: gibibytes with decimals", bytes: 3.75 * 1024 * 1024 * 1024, base: BaseBinary, want: "3.75GiB"},
+		{name: "Binary: removes trailing zeros", bytes: 10 * 1024, base: BaseBinary, want: "10KiB"},
 
-	t.Run("SI: kilobytes with decimals", func(t *testing.T) {
-		result := FormatBytes(1500, BaseSI) // 1.5KB
-		assert.Equal(t, "1.5KB", result)
-	})
+		// Edge Cases
+		{name: "zero bytes SI", bytes: 0, base: BaseSI, want: "0B"},
+		{name: "zero bytes Binary", bytes: 0, base: BaseBinary, want: "0B"},
+		{name: "very small decimal values", bytes: 1024.01, base: BaseBinary, want: "1KiB"},
+		{name: "fractional KB/KiB", bytes: 2048.5, base: BaseBinary, want: "2KiB"},
+	}
 
-	t.Run("SI: exact 1MB", func(t *testing.T) {
-		result := FormatBytes(1000*1000, BaseSI)
-		assert.Equal(t, "1MB", result)
-	})
-
-	t.Run("SI: megabytes with decimals", func(t *testing.T) {
-		result := FormatBytes(2.5*1000*1000, BaseSI)
-		assert.Equal(t, "2.5MB", result)
-	})
-
-	t.Run("SI: exact 1GB", func(t *testing.T) {
-		result := FormatBytes(1000*1000*1000, BaseSI)
-		assert.Equal(t, "1GB", result)
-	})
-
-	t.Run("SI: gigabytes with decimals", func(t *testing.T) {
-		result := FormatBytes(3.75*1000*1000*1000, BaseSI)
-		assert.Equal(t, "3.75GB", result)
-	})
-
-	t.Run("SI: removes trailing zeros", func(t *testing.T) {
-		result := FormatBytes(10000, BaseSI) // 10KB exactly
-		assert.Equal(t, "10KB", result)
-	})
-
-	// Binary Base (1024) Tests
-	t.Run("Binary: bytes less than base", func(t *testing.T) {
-		result := FormatBytes(512, BaseBinary)
-		assert.Equal(t, "512B", result)
-	})
-
-	t.Run("Binary: exact 1KiB", func(t *testing.T) {
-		result := FormatBytes(1024, BaseBinary)
-		assert.Equal(t, "1KiB", result)
-	})
-
-	t.Run("Binary: kibibytes with decimals", func(t *testing.T) {
-		result := FormatBytes(1536, BaseBinary) // 1.5KiB
-		assert.Equal(t, "1.5KiB", result)
-	})
-
-	t.Run("Binary: exact 1MiB", func(t *testing.T) {
-		result := FormatBytes(1024*1024, BaseBinary)
-		assert.Equal(t, "1MiB", result)
-	})
-
-	t.Run("Binary: mebibytes with decimals", func(t *testing.T) {
-		result := FormatBytes(2.5*1024*1024, BaseBinary)
-		assert.Equal(t, "2.5MiB", result)
-	})
-
-	t.Run("Binary: exact 1GiB", func(t *testing.T) {
-		result := FormatBytes(1024*1024*1024, BaseBinary)
-		assert.Equal(t, "1GiB", result)
-	})
-
-	t.Run("Binary: gibibytes with decimals", func(t *testing.T) {
-		result := FormatBytes(3.75*1024*1024*1024, BaseBinary)
-		assert.Equal(t, "3.75GiB", result)
-	})
-
-	t.Run("Binary: removes trailing zeros", func(t *testing.T) {
-		result := FormatBytes(10*1024, BaseBinary) // 10KiB exactly
-		assert.Equal(t, "10KiB", result)
-	})
-
-	// Edge Cases
-	t.Run("zero bytes", func(t *testing.T) {
-		result := FormatBytes(0, BaseSI)
-		assert.Equal(t, "0B", result)
-		result = FormatBytes(0, BaseBinary)
-		assert.Equal(t, "0B", result)
-	})
-
-	t.Run("very small decimal values", func(t *testing.T) {
-		result := FormatBytes(1024.01, BaseBinary)
-		assert.Equal(t, "1KiB", result) // Should trim .00
-	})
-
-	t.Run("fractional KB/KiB", func(t *testing.T) {
-		result := FormatBytes(2048.5, BaseBinary) // 2.0005KiB
-		assert.Equal(t, "2KiB", result)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FormatBytes(tt.bytes, tt.base)
+			assert.Equal(t, tt.want, result)
+		})
+	}
 }
 
 func TestFormatDuration(t *testing.T) {
-	t.Run("nanoseconds", func(t *testing.T) {
-		result := FormatDuration(500 * time.Nanosecond)
-		assert.Equal(t, "500ns", result)
-	})
+	tests := []struct {
+		name     string
+		duration time.Duration
+		want     string
+	}{
+		{name: "nanoseconds", duration: 500 * time.Nanosecond, want: "500ns"},
+		{name: "microseconds", duration: 1500 * time.Microsecond, want: "2ms"},
+		{name: "milliseconds", duration: 250 * time.Millisecond, want: "250ms"},
+		{name: "seconds with rounding", duration: 1234*time.Millisecond + 567*time.Microsecond, want: "1.23s"},
+		{name: "exact minute", duration: 1 * time.Minute, want: "1m0s"},
+		{name: "minutes with seconds", duration: 2*time.Minute + 30*time.Second, want: "2m30s"},
+		{name: "hours", duration: 1*time.Hour + 15*time.Minute + 30*time.Second, want: "1h15m30s"},
+		{name: "zero duration", duration: 0, want: "0s"},
+	}
 
-	t.Run("microseconds", func(t *testing.T) {
-		result := FormatDuration(1500 * time.Microsecond)
-		// Rounds to nearest microsecond
-		assert.Equal(t, "2ms", result)
-	})
-
-	t.Run("milliseconds", func(t *testing.T) {
-		result := FormatDuration(250 * time.Millisecond)
-		assert.Equal(t, "250ms", result)
-	})
-
-	t.Run("seconds with rounding", func(t *testing.T) {
-		result := FormatDuration(1234*time.Millisecond + 567*time.Microsecond)
-		// Should round to 10ms precision
-		assert.Equal(t, "1.23s", result)
-	})
-
-	t.Run("exact minute", func(t *testing.T) {
-		result := FormatDuration(1 * time.Minute)
-		assert.Equal(t, "1m0s", result)
-	})
-
-	t.Run("minutes with seconds", func(t *testing.T) {
-		result := FormatDuration(2*time.Minute + 30*time.Second)
-		assert.Equal(t, "2m30s", result)
-	})
-
-	t.Run("hours", func(t *testing.T) {
-		result := FormatDuration(1*time.Hour + 15*time.Minute + 30*time.Second)
-		assert.Equal(t, "1h15m30s", result)
-	})
-
-	t.Run("zero duration", func(t *testing.T) {
-		result := FormatDuration(0)
-		assert.Equal(t, "0s", result)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FormatDuration(tt.duration)
+			assert.Equal(t, tt.want, result)
+		})
+	}
 }
 
 func TestFilter(t *testing.T) {

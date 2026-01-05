@@ -204,6 +204,57 @@ func TestConcurrentLineProcessor_SmallChunkSize_OrderNotGuaranteed(t *testing.T)
 	assert.Greater(t, metrics.BytesWritten, int64(0))
 }
 
+func TestConcurrentLineProcessor_ChunksizeSmallerThanSingleRow(t *testing.T) {
+	input := "line1\nline2\nline3\nline4\nline5\n"
+	r := newReadCloser(input)
+	pr := NewConcurrentLineProcessor(r, WithChunkSize(2)) // very small chunk size
+	out, err := io.ReadAll(pr)
+	assert.NoError(t, err)
+	// Split and compare as sets (ignoring order)
+	inputLines := strings.Split(strings.TrimSpace(input), "\n")
+	outputLines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	assert.Equal(t, len(inputLines), len(outputLines))
+
+	lineCount := make(map[string]int)
+	for _, l := range inputLines {
+		lineCount[l]++
+	}
+	for _, l := range outputLines {
+		lineCount[l]--
+	}
+	for l, c := range lineCount {
+		assert.Equal(t, 0, c, "line %q count mismatch", l)
+	}
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(5), metrics.RowsRead)
+	assert.Equal(t, int64(5), metrics.RowsWritten)
+	assert.Equal(t, int64(len(input)), metrics.BytesRead)
+	assert.Greater(t, metrics.BytesWritten, int64(0))
+}
+
+func TestOnGrownChunkReuse(t *testing.T) {
+	chunkSize := 10
+	input := "123456789012345\n"
+	r := newReadCloser(input)
+
+	p := NewConcurrentLineProcessor(r, WithChunkSize(chunkSize), WithWorkers(1))
+
+	// To increase chance of picking the large chunk in iter 2, we can clear the pool or fill it with large chunks.
+	for i := 0; i < 10; i++ {
+		p.chunkPool.Put(&Chunk{data: make([]byte, 100)})
+	}
+
+	out, err := io.ReadAll(p)
+	assert.NoError(t, err)
+
+	assert.Equal(t, input, string(out))
+	m := p.Metrics()
+	assert.Equal(t, int64(1), m.RowsRead)
+	assert.Equal(t, int64(1), m.RowsWritten)
+	assert.Equal(t, int64(16), m.BytesRead)
+}
+
 func TestConcurrentLineProcessor_MultipleReaders(t *testing.T) {
 	r1 := newReadCloser("alpha\nbeta\n")
 	r2 := newReadCloser("gamma\ndelta\n")
@@ -236,6 +287,27 @@ func TestConcurrentLineProcessor_MultipleReaders(t *testing.T) {
 	assert.Greater(t, metrics.BytesRead, int64(0))
 	assert.Greater(t, metrics.BytesWritten, int64(0))
 	assert.Equal(t, 4, pr.RowsRead())
+}
+
+func TestConcurrentLineProcessor_MultipleReadersWithRowLimit(t *testing.T) {
+	r1 := newReadCloser("line1\nline2\nline3\nline4\n")
+	r2 := newReadCloser("line5\nline6\nline7\nline8\n")
+	r3 := newReadCloser("line9\nline10\nline11\n")
+
+	pr := NewConcurrentLineProcessor(nil, WithReaders(r1, r2, r3), WithRowsReadLimit(6))
+	out, err := io.ReadAll(pr)
+	assert.NoError(t, err)
+
+	content := strings.TrimRight(string(out), "\n")
+	assert.NotEmpty(t, content)
+
+	lines := strings.Split(content, "\n")
+	assert.Len(t, lines, 6, "expected exactly 6 lines due to row limit")
+
+	metrics := pr.Metrics()
+	assert.Equal(t, int64(6), metrics.RowsRead)
+	assert.Equal(t, int64(6), metrics.RowsWritten)
+	assert.Equal(t, 6, pr.RowsRead())
 }
 
 func TestConcurrentLineProcessor_MultipleReadersLargeInput(t *testing.T) {
