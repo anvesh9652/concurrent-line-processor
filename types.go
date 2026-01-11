@@ -52,8 +52,8 @@ type Chunk struct {
 	// from previous pool reuse. This avoids repeated reslicing.
 	endingPos int
 
-	// rowsWritten tracks how many rows were written in this chunk after processing.
-	rowsWritten int64
+	// rows tracks how many rows were there in chunk.
+	rows int64
 }
 
 // ChunkDetails provides contextual information about the data being processed.

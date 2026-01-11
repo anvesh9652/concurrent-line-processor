@@ -288,6 +288,7 @@ func (p *concurrentLineProcessor) handleReader(ctx context.Context, readerID int
 		}
 		chunk.endingPos += read
 		chunk.endingPos, linesToUpdate = p.trimmedBuff(chunk.data[:chunk.endingPos])
+		chunk.rows = int64(linesToUpdate)
 		atomic.AddInt64(&p.metrics.BytesRead, int64(read))
 
 		if p.isLimitReached(chunk, linesToUpdate) {
@@ -337,7 +338,9 @@ func (p *concurrentLineProcessor) processChunks(ctx context.Context) error {
 func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk *Chunk) error {
 	if p.isLineProcessor == nil || p.customDataProcessor == nil {
 		EnsureNewLineAtEnd(chunk)
-		chunk.rowsWritten += int64(bytes.Count(chunk.data[:chunk.endingPos], []byte("\n")))
+		if chunk.rows == 0 { // will be 0 only when it's the last line without '\n' at the end.
+			chunk.rows = 1
+		}
 		return sendToStream(ctx, p.outStream, chunk)
 	}
 
@@ -352,6 +355,7 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 
 	chunkDetails.ChunkID, chunkDetails.ReaderID = chunk.id, chunk.readerID
 	resChunk := p.newChunkFromPool(chunk.id, chunk.readerID)
+	resChunk.Grow(chunk.endingPos)
 
 	if !*p.isLineProcessor {
 		if err := p.customDataProcessor(data, chunkDetails, resChunk); err != nil {
@@ -372,7 +376,7 @@ func (p *concurrentLineProcessor) processSingleChunk(ctx context.Context, chunk 
 	// Learning: writing each line to the output stream one by one drastically worse the performance
 	// due to the channels getting blocked for after few single line writes
 	// It is better to write the whole chunk at once to the output stream
-	resChunk.rowsWritten += int64(bytes.Count(resChunk.data[:resChunk.endingPos], []byte("\n")))
+	resChunk.rows += int64(bytes.Count(resChunk.data[:resChunk.endingPos], newLine))
 	return sendToStream(ctx, p.outStream, resChunk)
 }
 
@@ -391,7 +395,7 @@ func (p *concurrentLineProcessor) writeProcessedData(ctx context.Context) error 
 			}
 
 			atomic.AddInt64(&p.metrics.BytesWritten, int64(n))
-			atomic.AddInt64(&p.metrics.RowsWritten, chunk.rowsWritten)
+			atomic.AddInt64(&p.metrics.RowsWritten, chunk.rows)
 			return nil
 		}
 		if err := write(chunk); err != nil {
@@ -476,7 +480,7 @@ func (p *concurrentLineProcessor) newChunkFromPool(chunkID, readerID int) *Chunk
 	// Reslicing prevents the reuse of larger buffers (in ⁠.Read) that were created by appends.
 	// When a grown buffer is returned to the pool, appending makes it even larger.
 	chunk.data = chunk.data[:p.chunkSize]
-	chunk.id, chunk.readerID, chunk.endingPos, chunk.rowsWritten = chunkID, readerID, 0, 0
+	chunk.id, chunk.readerID, chunk.endingPos, chunk.rows = chunkID, readerID, 0, 0
 	return chunk
 }
 
